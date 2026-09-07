@@ -19,6 +19,12 @@ export default function DashboardLayout({
           <Link href="/dashboard/employees" className="hover:underline">
             従業員
           </Link>
+          <Link href="/dashboard/leave-requests" className="hover:underline">
+            休み希望・NG曜日
+          </Link>
+          <Link href="/dashboard/staffing-requirements" className="hover:underline">
+            必要人数設定
+          </Link>
         </nav>
       </header>
       <div className="p-6">{children}</div>
