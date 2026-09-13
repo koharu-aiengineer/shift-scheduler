@@ -25,6 +25,9 @@ export default function DashboardLayout({
           <Link href="/dashboard/staffing-requirements" className="hover:underline">
             必要人数設定
           </Link>
+          <Link href="/dashboard/shift" className="hover:underline">
+            シフト生成
+          </Link>
         </nav>
       </header>
       <div className="p-6">{children}</div>
