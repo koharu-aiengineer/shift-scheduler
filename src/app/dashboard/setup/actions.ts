@@ -27,5 +27,8 @@ export async function createStore(formData: FormData) {
     throw new Error(error.message);
   }
 
-  redirect("/dashboard");
+  // 初回ログイン時点ではまだstore行が無くGoogleリフレッシュトークンを
+  // 保存できていない（auth/callback/route.ts参照）。店舗作成直後に
+  // 再度Googleログインを要求し、その場で確実に保存する。
+  redirect("/login?reauth=1");
 }

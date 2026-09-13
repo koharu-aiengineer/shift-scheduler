@@ -10,7 +10,7 @@
 ## 技術スタック
 
 - フロントエンド: Next.js + TypeScript + Tailwind CSS
-- バックエンド: Next.js API Routes（必要に応じてSupabase Edge Functions）
+- バックエンド: Next.js Server Actions（Google OAuthコールバックなど一部の処理は`route.ts`のAPI Routeを使用。必要に応じてSupabase Edge Functions）
 - DB: Supabase（店舗・従業員・ルールなどのマスタ管理）
 - 外部連携: Google Sheets API、Google OAuth（店長ログイン）
 - ホスティング: Vercel
