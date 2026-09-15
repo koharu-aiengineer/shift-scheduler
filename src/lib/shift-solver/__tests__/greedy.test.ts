@@ -253,6 +253,71 @@ describe("buildGreedySolution: 雇用形態別必須人数", () => {
   });
 });
 
+describe("buildGreedySolution: 週単位の需給比による目標人数の按分", () => {
+  it("週の供給が需要を下回る週でも通常週ではtargetCountがrequiredCountと変わらない（fillRatio=1）", () => {
+    // 供給が需要以上の週では按分が発生しないことを確認する回帰用テスト
+    const employees = [employee("emp-a"), employee("emp-b")];
+    const input = baseInput({
+      periodStart: "2026-09-07",
+      periodEnd: "2026-09-07",
+      employees,
+      staffingRequirements: [{ shiftTypeId: dayShift.id, defaultRequiredCount: 1, overrides: [] }],
+    });
+
+    const { violations } = buildGreedySolution(input);
+
+    expect(violations).toHaveLength(0);
+  });
+
+  it("週の合計必要人数が週の供給可能人日を上回る場合、不足を特定の曜日に集中させず週全体に分散させる", () => {
+    const weeklyLimited: EmploymentType = {
+      ...freeType,
+      id: "et-weekly-limited",
+      maxWorkDaysPerWeek: 3,
+    };
+    const employees = [
+      employee("emp-1", { employmentTypeId: weeklyLimited.id }),
+      employee("emp-2", { employmentTypeId: weeklyLimited.id }),
+      employee("emp-3", { employmentTypeId: weeklyLimited.id }),
+      employee("emp-4", { employmentTypeId: weeklyLimited.id }),
+    ];
+    // 週供給: 4人 x 3日 = 12人日。週需要: 3人/日 x 7日 = 21人日 → 供給不足の週
+    const input = baseInput({
+      periodStart: "2026-09-07", // 月曜
+      periodEnd: "2026-09-13", // 日曜（ちょうど1週間）
+      employees,
+      employmentTypes: [weeklyLimited],
+      staffingRequirements: [{ shiftTypeId: dayShift.id, defaultRequiredCount: 3, overrides: [] }],
+    });
+
+    const { assignments } = buildGreedySolution(input);
+
+    const shiftCountByDate = new Map<string, number>();
+    for (const a of assignments.filter((x) => x.kind === "shift")) {
+      shiftCountByDate.set(a.date, (shiftCountByDate.get(a.date) ?? 0) + 1);
+    }
+
+    const dates = [
+      "2026-09-07",
+      "2026-09-08",
+      "2026-09-09",
+      "2026-09-10",
+      "2026-09-11",
+      "2026-09-12",
+      "2026-09-13",
+    ];
+    // 暦順に3人ずつ埋める素朴な貪欲法なら供給12人日を4日で使い切り、
+    // 残り3日（特に週末の日曜）は0人になる。週単位の按分により、
+    // 7日すべてに出勤者がいる（＝不足が週全体に分散している）ことを確認する。
+    for (const date of dates) {
+      expect(shiftCountByDate.get(date) ?? 0).toBeGreaterThan(0);
+    }
+    // 供給量の上限（12人日）は超えない
+    const totalShifts = [...shiftCountByDate.values()].reduce((a, b) => a + b, 0);
+    expect(totalShifts).toBeLessThanOrEqual(12);
+  });
+});
+
 describe("buildGreedySolution: 極端なケース（人数不足）", () => {
   it("従業員が1人しかおらず必要人数を満たせない場合、割当て可能な分だけ割り当てハード違反を記録する", () => {
     const employees = [employee("emp-a")];

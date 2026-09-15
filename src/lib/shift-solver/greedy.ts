@@ -6,12 +6,18 @@ import {
   type EmployeeWorkStats,
 } from "./constraints";
 import { enumerateDates, getIsoWeekStart } from "./dateUtils";
-import { buildRequirementLookup, requirementKey, resolveRequirements } from "./resolveRequirements";
+import {
+  buildRequirementLookup,
+  requirementKey,
+  resolveRequirements,
+  type ResolvedRequirement,
+} from "./resolveRequirements";
 import type {
   Assignment,
   AssignmentKind,
   ConstraintViolation,
   Employee,
+  EmploymentType,
   ISODate,
   SolverInput,
 } from "./types";
@@ -46,6 +52,21 @@ export function buildGreedySolution(input: SolverInput): GreedyResult {
   const resolved = resolveRequirements(input.periodStart, input.periodEnd, input.staffingRequirements);
   const requirementLookup = buildRequirementLookup(resolved);
 
+  // 週あたり合計必要人数が、雇用形態の週稼働日数上限の合計（週あたりの
+  // 理論上の供給可能人日）を上回る週では、日付を暦順に埋めていくと
+  // 週後半（実務上は土日になりやすい）に不足がしわ寄せされる。
+  // そのような週だけ、各日・各勤務区分の「今日の目標人数」を、その時点で
+  // 週に残っている供給・需要の比率で按分縮小し、不足を週全体に分散させる。
+  // 固定比率ではなく「残り」を都度再計算するのは、ある日にNG曜日などで
+  // 目標未達だった分を翌日以降の目標に回せるようにするため（固定比率だと、
+  // 本来フルに埋まる日まで一律に縮小してしまい、枠を無駄にする）。
+  // 従業員ごとの連勤上限・状態追跡には一切触れないため、既存のハード制約
+  // 判定はそのまま安全に動く。
+  const weeklyDemand = computeWeeklyDemand(resolved);
+  const totalWeeklySupply = computeTotalWeeklySupply(input.employees, employmentTypeById);
+  const weeklySupplyRemaining = new Map<ISODate, number>();
+  const weeklyDemandRemaining = new Map<ISODate, number>();
+
   const state = new Map<string, EmployeeRuntimeState>(
     input.employees.map((employee) => [
       employee.id,
@@ -78,6 +99,14 @@ export function buildGreedySolution(input: SolverInput): GreedyResult {
 
   for (const date of dates) {
     const weekStart = getIsoWeekStart(date);
+    if (!weeklySupplyRemaining.has(weekStart)) {
+      weeklySupplyRemaining.set(weekStart, totalWeeklySupply);
+      weeklyDemandRemaining.set(weekStart, weeklyDemand.get(weekStart) ?? 0);
+    }
+    const supplyRemaining = weeklySupplyRemaining.get(weekStart)!;
+    const demandRemaining = weeklyDemandRemaining.get(weekStart)!;
+    const fillRatio = demandRemaining <= 0 ? 1 : Math.max(0, Math.min(1, supplyRemaining / demandRemaining));
+
     for (const employee of input.employees) {
       const s = state.get(employee.id)!;
       if (s.currentWeekStart !== weekStart) {
@@ -163,13 +192,25 @@ export function buildGreedySolution(input: SolverInput): GreedyResult {
     const shiftPlanForToday = input.shiftTypes
       .map((shiftType) => {
         const requiredCount = requirementLookup.get(requirementKey(date, shiftType.id)) ?? 0;
+        const minStaffingFloor = input.employmentTypeMinStaffing
+          .filter((r) => r.shiftTypeId === shiftType.id)
+          .reduce((sum, r) => sum + r.minCount, 0);
+        // 週の需給が厳しい週だけ、今日の目標人数を按分縮小する（雇用形態別
+        // 必須人数の下限は必ず下回らないようにする）。通常週はfillRatio=1のため
+        // targetCount === requiredCountで、既存の挙動と変わらない。
+        // 端数はMath.floorで切り捨てる: Σfloor(requiredCount_i × fillRatio) は
+        // 常に週の供給量以下になることが数学的に保証される（Σ(x_i×r) = r×Σx_i =
+        // 供給量になるため）。Math.roundやMath.ceilだと週の目標合計が供給量を
+        // 超えたままになり得て、結局週の前半で供給を使い切り後半の曜日が
+        // ゼロ人のまま、という元の問題を解消しきれない。
+        const targetCount = Math.max(minStaffingFloor, Math.floor(requiredCount * fillRatio));
         const eligibleCount = input.employees.filter((e) => isEligible(e, shiftType.id)).length;
-        return { shiftType, requiredCount, slack: eligibleCount - requiredCount };
+        return { shiftType, requiredCount, targetCount, slack: eligibleCount - targetCount };
       })
       .filter((entry) => entry.requiredCount > 0)
       .sort((a, b) => a.slack - b.slack);
 
-    for (const { shiftType, requiredCount } of shiftPlanForToday) {
+    for (const { shiftType, requiredCount, targetCount } of shiftPlanForToday) {
       const minStaffingForShift = input.employmentTypeMinStaffing.filter(
         (r) => r.shiftTypeId === shiftType.id,
       );
@@ -184,7 +225,7 @@ export function buildGreedySolution(input: SolverInput): GreedyResult {
         const pool = input.employees.filter((e) => e.employmentTypeId === requirement.employmentTypeId);
         const ordered = orderCandidates(pool, shiftType.id);
         for (const candidate of ordered) {
-          if (shortfall <= 0 || assignedCount >= requiredCount) break;
+          if (shortfall <= 0 || assignedCount >= targetCount) break;
           assign(candidate, shiftType.id, shiftType.name);
           assignedCountByEmploymentType.set(
             requirement.employmentTypeId,
@@ -207,10 +248,10 @@ export function buildGreedySolution(input: SolverInput): GreedyResult {
       }
 
       // Step2: 残りの必要人数を全体から充足
-      if (assignedCount < requiredCount) {
+      if (assignedCount < targetCount) {
         const ordered = orderCandidates(input.employees, shiftType.id);
         for (const candidate of ordered) {
-          if (assignedCount >= requiredCount) break;
+          if (assignedCount >= targetCount) break;
           assign(candidate, shiftType.id, shiftType.name);
           assignedCount += 1;
         }
@@ -227,6 +268,12 @@ export function buildGreedySolution(input: SolverInput): GreedyResult {
         });
       }
     }
+
+    // 週の残り供給・残り需要を、今日実際に消費した分だけ減らす（固定比率ではなく
+    // 「残り」を都度更新することで、今日目標未達だった分は翌日以降に回る）
+    const todayDemand = shiftPlanForToday.reduce((sum, entry) => sum + entry.requiredCount, 0);
+    weeklySupplyRemaining.set(weekStart, supplyRemaining - assignedToday.size);
+    weeklyDemandRemaining.set(weekStart, demandRemaining - todayDemand);
 
     // 出勤しなかった従業員の休み区分を確定し、勤務実績カウンタを更新する
     for (const employee of input.employees) {
@@ -250,4 +297,30 @@ export function buildGreedySolution(input: SolverInput): GreedyResult {
   }
 
   return { assignments, violations };
+}
+
+// 週開始日（ISO週の月曜日）ごとの合計必要人数（週の需要合計）を返す。
+function computeWeeklyDemand(resolved: ResolvedRequirement[]): Map<ISODate, number> {
+  const weeklyDemand = new Map<ISODate, number>();
+  for (const entry of resolved) {
+    const weekStart = getIsoWeekStart(entry.date);
+    weeklyDemand.set(weekStart, (weeklyDemand.get(weekStart) ?? 0) + entry.requiredCount);
+  }
+  return weeklyDemand;
+}
+
+// 雇用形態の週稼働日数上限を全従業員分合計した、週あたりの理論上の
+// 供給可能人日（全週共通の定数）。週稼働日数上限が無い（null）従業員が
+// 1人でもいれば、供給は事実上無制限（Infinity）とみなす。
+function computeTotalWeeklySupply(
+  employees: Employee[],
+  employmentTypeById: Map<string, EmploymentType>,
+): number {
+  let totalWeeklySupply = 0;
+  for (const employee of employees) {
+    const cap = employmentTypeById.get(employee.employmentTypeId)?.maxWorkDaysPerWeek;
+    if (cap == null) return Infinity;
+    totalWeeklySupply += cap;
+  }
+  return totalWeeklySupply;
 }
