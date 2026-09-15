@@ -2,6 +2,7 @@ import {
   computeShiftHours,
   findUnmetEmploymentTypeMinStaffing,
   isLeaveRequested,
+  isNgWeekday,
   isShiftAllowedForEmploymentType,
 } from "./constraints";
 import { addDaysToDate, enumerateDates, getIsoWeekStart } from "./dateUtils";
@@ -128,9 +129,9 @@ function buildSwappedAssignment(
   return { kind, shiftTypeId: null };
 }
 
-// このスワップが従業員個人のハード制約（雇用形態の禁止勤務区分・連勤上限・
-// 週あたり勤務日数/時間上限）を壊さないかを判定する。休みへの変更は
-// ハード制約を壊しようがないため常に安全。
+// このスワップが従業員個人のハード制約（休み希望・NG曜日・雇用形態の禁止
+// 勤務区分・連勤上限・週あたり勤務日数/時間上限）を壊さないかを判定する。
+// 休みへの変更はハード制約を壊しようがないため常に安全。
 function isChangeHardConstraintSafe(
   employeeId: string,
   date: ISODate,
@@ -144,6 +145,8 @@ function isChangeHardConstraintSafe(
   const employmentType = employee ? context.employmentTypeById.get(employee.employmentTypeId) : undefined;
   const shiftType = context.shiftTypeById.get(newAssignment.shiftTypeId!);
   if (!employee || !employmentType || !shiftType) return false;
+
+  if (isLeaveRequested(employee, date) || isNgWeekday(employee, date)) return false;
 
   if (!isShiftAllowedForEmploymentType(employmentType, shiftType.id)) return false;
 

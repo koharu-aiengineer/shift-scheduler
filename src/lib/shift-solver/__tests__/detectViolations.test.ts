@@ -83,7 +83,7 @@ describe("detectViolations: 構築過程に依存せず、渡されたassignment
     const violations = detectViolations(assignments, input);
 
     expect(violations).toContainEqual(
-      expect.objectContaining({ severity: "soft", type: "leave_request_not_honored", employeeId: "emp-a" }),
+      expect.objectContaining({ severity: "hard", type: "leave_request_not_honored", employeeId: "emp-a" }),
     );
   });
 
@@ -97,7 +97,7 @@ describe("detectViolations: 構築過程に依存せず、渡されたassignment
     const violations = detectViolations(assignments, input);
 
     expect(violations).toContainEqual(
-      expect.objectContaining({ severity: "soft", type: "ng_weekday_not_honored", employeeId: "emp-a" }),
+      expect.objectContaining({ severity: "hard", type: "ng_weekday_not_honored", employeeId: "emp-a" }),
     );
   });
 

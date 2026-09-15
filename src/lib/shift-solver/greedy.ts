@@ -31,11 +31,10 @@ export type GreedyResult = {
   violations: ConstraintViolation[];
 };
 
-// 従業員ごとの実行時状態。公平性の優先順位づけ（勤務日数・休み希望を
-// 破られた回数）と、ハード制約判定用の勤務実績の両方をここで追跡する。
+// 従業員ごとの実行時状態。公平性の優先順位づけ（勤務日数）と、
+// ハード制約判定用の勤務実績の両方をここで追跡する。
 type EmployeeRuntimeState = {
   workDaysSoFar: number;
-  softBreakCount: number; // 休み希望・NG曜日を破られた回数（優先順位の二次キー）
   consecutiveWorkDays: number; // 直前の日までの連続勤務日数
   currentWeekStart: ISODate | null;
   workDaysThisWeek: number;
@@ -72,7 +71,6 @@ export function buildGreedySolution(input: SolverInput): GreedyResult {
       employee.id,
       {
         workDaysSoFar: 0,
-        softBreakCount: 0,
         consecutiveWorkDays: 0,
         currentWeekStart: null,
         workDaysThisWeek: 0,
@@ -87,14 +85,6 @@ export function buildGreedySolution(input: SolverInput): GreedyResult {
   const compareByWorkDays = (a: Employee, b: Employee): number => {
     const diff = state.get(a.id)!.workDaysSoFar - state.get(b.id)!.workDaysSoFar;
     return diff !== 0 ? diff : a.id.localeCompare(b.id);
-  };
-
-  const compareByBreakPriority = (a: Employee, b: Employee): number => {
-    const sa = state.get(a.id)!;
-    const sb = state.get(b.id)!;
-    if (sa.workDaysSoFar !== sb.workDaysSoFar) return sa.workDaysSoFar - sb.workDaysSoFar;
-    if (sa.softBreakCount !== sb.softBreakCount) return sa.softBreakCount - sb.softBreakCount;
-    return a.id.localeCompare(b.id);
   };
 
   for (const date of dates) {
@@ -119,8 +109,11 @@ export function buildGreedySolution(input: SolverInput): GreedyResult {
     const assignedToday = new Set<string>();
     const todayShiftByEmployee = new Map<string, string>();
 
+    // 休み希望日・NG曜日はハード制約（ユーザー決定事項）: この日に希望・NGが
+    // ある従業員はそもそも候補から除外し、どんなに人手が足りなくても破らない。
     const isEligible = (employee: Employee, shiftTypeId: string): boolean => {
       if (assignedToday.has(employee.id)) return false;
+      if (isLeaveRequested(employee, date) || isNgWeekday(employee, date)) return false;
       const employmentType = employmentTypeById.get(employee.employmentTypeId);
       const shiftType = shiftTypeById.get(shiftTypeId);
       if (!employmentType || !shiftType) return false;
@@ -133,54 +126,13 @@ export function buildGreedySolution(input: SolverInput): GreedyResult {
       return canAssignShift(employmentType, shiftType, stats);
     };
 
-    // 候補プールを「希望を破らない人」「破ることになる人」に分け、
-    // それぞれ優先順位でソートして連結する（破らない人を必ず先に検討する）
     const orderCandidates = (pool: Employee[], shiftTypeId: string): Employee[] => {
-      const preferred: Employee[] = [];
-      const violating: Employee[] = [];
-      for (const employee of pool) {
-        if (!isEligible(employee, shiftTypeId)) continue;
-        if (isLeaveRequested(employee, date) || isNgWeekday(employee, date)) {
-          violating.push(employee);
-        } else {
-          preferred.push(employee);
-        }
-      }
-      preferred.sort(compareByWorkDays);
-      violating.sort(compareByBreakPriority);
-      return [...preferred, ...violating];
+      return pool.filter((employee) => isEligible(employee, shiftTypeId)).sort(compareByWorkDays);
     };
 
-    const assign = (employee: Employee, shiftTypeId: string, shiftTypeName: string) => {
+    const assign = (employee: Employee, shiftTypeId: string) => {
       assignedToday.add(employee.id);
       todayShiftByEmployee.set(employee.id, shiftTypeId);
-
-      const brokeLeave = isLeaveRequested(employee, date);
-      const brokeNg = isNgWeekday(employee, date);
-      if (brokeLeave || brokeNg) {
-        state.get(employee.id)!.softBreakCount += 1;
-      }
-      if (brokeLeave) {
-        violations.push({
-          severity: "soft",
-          type: "leave_request_not_honored",
-          date,
-          employeeId: employee.id,
-          shiftTypeId,
-          message: `${employee.name}の休み希望日（${date}）に${shiftTypeName}を割り当てました。`,
-        });
-      }
-      if (brokeNg) {
-        violations.push({
-          severity: "soft",
-          type: "ng_weekday_not_honored",
-          date,
-          employeeId: employee.id,
-          shiftTypeId,
-          message: `${employee.name}のNG曜日（${date}）に${shiftTypeName}を割り当てました。`,
-        });
-      }
-
       assignments.push({ date, employeeId: employee.id, kind: "shift", shiftTypeId });
     };
 
@@ -226,7 +178,7 @@ export function buildGreedySolution(input: SolverInput): GreedyResult {
         const ordered = orderCandidates(pool, shiftType.id);
         for (const candidate of ordered) {
           if (shortfall <= 0 || assignedCount >= targetCount) break;
-          assign(candidate, shiftType.id, shiftType.name);
+          assign(candidate, shiftType.id);
           assignedCountByEmploymentType.set(
             requirement.employmentTypeId,
             (assignedCountByEmploymentType.get(requirement.employmentTypeId) ?? 0) + 1,
@@ -252,7 +204,7 @@ export function buildGreedySolution(input: SolverInput): GreedyResult {
         const ordered = orderCandidates(input.employees, shiftType.id);
         for (const candidate of ordered) {
           if (assignedCount >= targetCount) break;
-          assign(candidate, shiftType.id, shiftType.name);
+          assign(candidate, shiftType.id);
           assignedCount += 1;
         }
       }

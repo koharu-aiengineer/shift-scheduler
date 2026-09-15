@@ -15,7 +15,10 @@ export function detectViolations(assignments: Assignment[], input: SolverInput):
   const resolved = resolveRequirements(input.periodStart, input.periodEnd, input.staffingRequirements);
   const requirementLookup = buildRequirementLookup(resolved);
 
-  // ソフト違反: 休み希望・NG曜日を破って出勤している割当てをそのまま検出する
+  // 休み希望・NG曜日はハード制約（ユーザー決定事項）。greedy.ts/localSearch.tsが
+  // 候補から除外する形で守っているため通常は検出されないはずだが、
+  // detectViolationsは最終assignmentsから独立に再計算する安全網という設計
+  // （このファイル冒頭のコメント参照）のため、ここでも引き続きチェックする。
   for (const assignment of assignments) {
     if (assignment.kind !== "shift") continue;
     const employee = employeeById.get(assignment.employeeId);
@@ -23,7 +26,7 @@ export function detectViolations(assignments: Assignment[], input: SolverInput):
 
     if (isLeaveRequested(employee, assignment.date)) {
       violations.push({
-        severity: "soft",
+        severity: "hard",
         type: "leave_request_not_honored",
         date: assignment.date,
         employeeId: employee.id,
@@ -33,7 +36,7 @@ export function detectViolations(assignments: Assignment[], input: SolverInput):
     }
     if (isNgWeekday(employee, assignment.date)) {
       violations.push({
-        severity: "soft",
+        severity: "hard",
         type: "ng_weekday_not_honored",
         date: assignment.date,
         employeeId: employee.id,

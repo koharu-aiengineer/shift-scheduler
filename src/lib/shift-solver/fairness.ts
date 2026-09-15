@@ -6,8 +6,10 @@ export type FairnessWeights = {
   softViolationWeight: number;
 };
 
-// 「勤務日数の均等さを最優先、休み希望・NG曜日の充足はその次」という方針
-// （ユーザー決定事項）に沿って、分散側の重みを十分大きくしている。
+// 休み希望・NG曜日は現在ハード制約（greedy.ts/localSearch.tsが候補から
+// 除外する形で必ず守る）のため、softViolationWeightが実際に効くのは理論上
+// 発生しないはずのケースの安全網のみ。勤務日数の均等さ（variance）が
+// スコアの主要な要素になる。
 export const DEFAULT_FAIRNESS_WEIGHTS: FairnessWeights = {
   workDaysVarianceWeight: 1,
   softViolationWeight: 0.01,

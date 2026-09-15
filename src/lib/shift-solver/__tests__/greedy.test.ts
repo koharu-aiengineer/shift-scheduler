@@ -74,16 +74,29 @@ describe("buildGreedySolution: 基本的な割当て", () => {
     expect(violations).toHaveLength(0);
   });
 
-  it("NG曜日は禁止勤務区分と違いハード制約ではないため、他に候補がいなければ割り当てる", () => {
+  it("NG曜日はハード制約のため、他に候補がいなくても割り当てない", () => {
     const employees = [employee("emp-a", { ngWeekdays: [1] })]; // 2026-09-07は月曜
     const input = baseInput({ employees });
 
     const { assignments, violations } = buildGreedySolution(input);
 
-    const shiftAssignment = assignments.find((a) => a.kind === "shift");
-    expect(shiftAssignment?.employeeId).toBe("emp-a");
+    expect(assignments.filter((a) => a.kind === "shift")).toHaveLength(0);
+    expect(assignments.find((a) => a.employeeId === "emp-a")?.kind).toBe("system_assigned_leave");
     expect(violations).toEqual([
-      expect.objectContaining({ severity: "soft", type: "ng_weekday_not_honored", employeeId: "emp-a" }),
+      expect.objectContaining({ severity: "hard", type: "understaffed" }),
+    ]);
+  });
+
+  it("休み希望日もハード制約のため、他に候補がいなくても割り当てない", () => {
+    const employees = [employee("emp-a", { leaveRequestDates: ["2026-09-07"] })];
+    const input = baseInput({ employees });
+
+    const { assignments, violations } = buildGreedySolution(input);
+
+    expect(assignments.filter((a) => a.kind === "shift")).toHaveLength(0);
+    expect(assignments.find((a) => a.employeeId === "emp-a")?.kind).toBe("requested_leave");
+    expect(violations).toEqual([
+      expect.objectContaining({ severity: "hard", type: "understaffed" }),
     ]);
   });
 
@@ -102,55 +115,44 @@ describe("buildGreedySolution: 基本的な割当て", () => {
   });
 });
 
-describe("buildGreedySolution: 休み希望を破る優先順位", () => {
-  it("破らざるを得ない場合、これまでの勤務日数が少ない人から優先して破る", () => {
-    // day1: K,L休み希望 → Mのみ出勤可 → M勤務
-    // day2: L,M休み希望 → Kのみ出勤可 → K勤務
-    // day3: K,L,M全員休み希望 → 全員破ることになる。
-    //   この時点の勤務日数: K=1, L=0, M=1 → 最も少ないLが選ばれるはず
+describe("buildGreedySolution: 休み希望・NG曜日は必ず守る（ハード制約）", () => {
+  it("その日の候補者全員が休み希望でも、誰にも割り当てず希望通り全員休みにする", () => {
     const employees = [
-      employee("emp-k", { leaveRequestDates: ["2026-09-07", "2026-09-09", "2026-09-10"] }),
-      employee("emp-l", { leaveRequestDates: ["2026-09-07", "2026-09-08", "2026-09-09", "2026-09-10"] }),
-      employee("emp-m", { leaveRequestDates: ["2026-09-08", "2026-09-09", "2026-09-10"] }),
+      employee("emp-k", { leaveRequestDates: ["2026-09-07"] }),
+      employee("emp-l", { leaveRequestDates: ["2026-09-07"] }),
+      employee("emp-m", { leaveRequestDates: ["2026-09-07"] }),
     ];
     const input = baseInput({
       periodStart: "2026-09-07",
-      periodEnd: "2026-09-10",
+      periodEnd: "2026-09-07",
       employees,
     });
 
-    const { assignments } = buildGreedySolution(input);
+    const { assignments, violations } = buildGreedySolution(input);
 
-    const day3Shift = assignments.find(
-      (a) => a.date === "2026-09-09" && a.kind === "shift",
-    );
-    expect(day3Shift?.employeeId).toBe("emp-l");
+    expect(assignments.filter((a) => a.kind === "shift")).toHaveLength(0);
+    expect(assignments.every((a) => a.kind === "requested_leave")).toBe(true);
+    expect(violations).toEqual([
+      expect.objectContaining({ severity: "hard", type: "understaffed", message: expect.stringContaining("不足1人") }),
+    ]);
   });
 
-  it("勤務日数が同点の場合は、休み希望を破られた回数が少ない人を優先して破る", () => {
-    // day1: K,L休み希望 → Mのみ出勤可 → M勤務（M:1日, 0回破られ）
-    // day2: L,M休み希望 → Kのみ出勤可 → K勤務（K:1日, 0回破られ）
-    // day3: 全員休み希望、勤務日数 K=1,L=0,M=1 → 最少のLが破られる（L:1日, 1回破られ）
-    // day4: 全員休み希望、勤務日数は K=1,L=1,M=1 で同点
-    //   → 破られた回数が少ないK・Mが優先され、破られた回数1のLは選ばれない
+  it("休み希望・NG曜日どちらでもない従業員がいれば、そちらを優先して割り当てる", () => {
     const employees = [
-      employee("emp-k", { leaveRequestDates: ["2026-09-07", "2026-09-09", "2026-09-10"] }),
-      employee("emp-l", { leaveRequestDates: ["2026-09-07", "2026-09-08", "2026-09-09", "2026-09-10"] }),
-      employee("emp-m", { leaveRequestDates: ["2026-09-08", "2026-09-09", "2026-09-10"] }),
+      employee("emp-k", { leaveRequestDates: ["2026-09-07"] }),
+      employee("emp-l", { ngWeekdays: [1] }), // 2026-09-07は月曜
+      employee("emp-m"),
     ];
     const input = baseInput({
       periodStart: "2026-09-07",
-      periodEnd: "2026-09-10",
+      periodEnd: "2026-09-07",
       employees,
     });
 
     const { assignments } = buildGreedySolution(input);
 
-    const day4Shift = assignments.find(
-      (a) => a.date === "2026-09-10" && a.kind === "shift",
-    );
-    expect(day4Shift?.employeeId).toBe("emp-k"); // emp-k, emp-mが同点でidの若い方
-    expect(day4Shift?.employeeId).not.toBe("emp-l"); // 前日に破られたLは避けられる
+    const shiftAssignment = assignments.find((a) => a.kind === "shift");
+    expect(shiftAssignment?.employeeId).toBe("emp-m");
   });
 });
 
@@ -158,13 +160,12 @@ describe("buildGreedySolution: ハード制約（連勤上限）", () => {
   it("連勤上限に達した従業員は、それ以上連続で割り当てない", () => {
     const limited: EmploymentType = { ...freeType, id: "et-limited", maxConsecutiveWorkDays: 2 };
     const employees = [
-      // emp-aは休み希望なし（常にpreferred）。公平性ソートで交代させられないよう
-      // emp-bには常に休み希望を入れ、連勤上限のハード制約だけが交代の理由になるようにする。
+      // emp-aは2026-09-07(月)・09-08(火)はNG曜日なし（常にpreferred）。
+      // 公平性ソートで交代させられないよう、emp-bには月・火をNG曜日にして
+      // ハード制約で除外し、連勤上限のハード制約だけがemp-a→emp-bの
+      // 交代理由になるようにする（09-09(水)はemp-bもNGなし）。
       employee("emp-a", { employmentTypeId: limited.id }),
-      employee("emp-b", {
-        employmentTypeId: limited.id,
-        leaveRequestDates: ["2026-09-07", "2026-09-08", "2026-09-09"],
-      }),
+      employee("emp-b", { employmentTypeId: limited.id, ngWeekdays: [1, 2] }),
     ];
     const input = baseInput({
       periodStart: "2026-09-07",
