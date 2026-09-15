@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentStore } from "@/lib/store";
+import { toFriendlyInsertError } from "@/lib/supabase/errors";
 
 function requireString(formData: FormData, field: string, label: string): string {
   const value = formData.get(field);
@@ -30,7 +31,7 @@ export async function createShiftType(formData: FormData) {
     color,
   });
 
-  if (error) throw new Error(error.message);
+  if (error) throw toFriendlyInsertError(error, `「${name}」という名称の勤務区分は既に登録されています`);
 
   revalidatePath("/dashboard/shift-types");
 }
@@ -52,7 +53,7 @@ export async function updateShiftType(formData: FormData) {
     .eq("id", id)
     .eq("store_id", store.id);
 
-  if (error) throw new Error(error.message);
+  if (error) throw toFriendlyInsertError(error, `「${name}」という名称の勤務区分は既に登録されています`);
 
   revalidatePath("/dashboard/shift-types");
 }

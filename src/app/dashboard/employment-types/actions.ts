@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentStore } from "@/lib/store";
+import { toFriendlyInsertError } from "@/lib/supabase/errors";
 
 function requireString(formData: FormData, field: string, label: string): string {
   const value = formData.get(field);
@@ -111,7 +112,7 @@ export async function createEmploymentType(formData: FormData) {
     .insert({ store_id: store.id, name })
     .select("id")
     .single();
-  if (error) throw new Error(error.message);
+  if (error) throw toFriendlyInsertError(error, `「${name}」という名称の雇用形態は既に登録されています`);
 
   const { error: ruleError } = await supabase.from("employment_type_rules").insert({
     employment_type_id: employmentType.id,
@@ -151,7 +152,7 @@ export async function updateEmploymentType(formData: FormData) {
     .update({ name })
     .eq("id", id)
     .eq("store_id", store.id);
-  if (error) throw new Error(error.message);
+  if (error) throw toFriendlyInsertError(error, `「${name}」という名称の雇用形態は既に登録されています`);
 
   const { error: ruleError } = await supabase
     .from("employment_type_rules")
