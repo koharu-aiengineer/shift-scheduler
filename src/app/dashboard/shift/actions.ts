@@ -5,7 +5,10 @@ import { getCurrentStore } from "@/lib/store";
 import { buildSolverInputForStore } from "@/lib/buildSolverInput";
 import { generateShift, type ConstraintViolation } from "@/lib/shift-solver";
 import { writeShiftOutput } from "@/lib/google/writeShiftOutput";
-import { computeDailyShiftCounts, type DailyShiftCount } from "@/lib/shift-output/computeDailyShiftCounts";
+import {
+  computeEmployeeShiftSummary,
+  type EmployeeShiftSummary,
+} from "@/lib/shift-output/computeEmployeeShiftSummary";
 
 export type GenerateShiftState = {
   status: "idle" | "success" | "error";
@@ -14,9 +17,9 @@ export type GenerateShiftState = {
   sheetTitle?: string;
   violations?: ConstraintViolation[];
   fairnessScore?: number;
-  // 日付ごと・勤務区分ごとの出勤人数。出力用スプレッドシートには書かず、
+  // 従業員ごとの勤務区分別出勤日数・休み日数。出力用スプレッドシートには書かず、
   // 店長画面（このページ）にのみ表示する。
-  dailyShiftCounts?: DailyShiftCount[];
+  employeeShiftSummary?: EmployeeShiftSummary[];
   // 生成が完了するたびに変わる値。再生成ボタンの確認状態をリセットするための
   // React key として使う（sheetTitle/spreadsheetUrlは同月なら毎回同じ値になるため使えない）。
   generatedAt?: string;
@@ -73,9 +76,8 @@ export async function generateAndWriteShift(
 
     const solverOutput = generateShift(solverInput);
 
-    const dailyShiftCounts = computeDailyShiftCounts({
-      periodStart,
-      periodEnd,
+    const employeeShiftSummary = computeEmployeeShiftSummary({
+      employees: employeeRows ?? [],
       shiftTypes: shiftTypeRows ?? [],
       assignments: solverOutput.assignments,
     });
@@ -103,7 +105,7 @@ export async function generateAndWriteShift(
       spreadsheetUrl: result.spreadsheetUrl,
       sheetTitle: result.sheetTitle,
       violations: solverOutput.violations,
-      dailyShiftCounts,
+      employeeShiftSummary,
       fairnessScore: solverOutput.fairnessScore,
       generatedAt: new Date().toISOString(),
     };
