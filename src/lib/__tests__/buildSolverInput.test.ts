@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  mapClosedDates,
   mapEmployees,
   mapEmploymentTypeMinStaffing,
   mapEmploymentTypes,
   mapShiftTypes,
   mapStaffingRequirements,
+  type ClosedDateRow,
+  type ClosedWeekdayRow,
   type EmployeeRow,
   type EmploymentTypeRow,
   type ShiftTypeRow,
@@ -164,6 +167,40 @@ describe("mapEmployees", () => {
     const result = mapEmployees(rows, "2026-09-01", "2026-09-30");
 
     expect(result[0].leaveRequestDates).toEqual(["2026-09-15"]);
+  });
+});
+
+describe("mapClosedDates", () => {
+  it("定休日（曜日）を対象期間内の日付に展開する", () => {
+    // 2026-09-07は月曜日
+    const closedWeekdayRows: ClosedWeekdayRow[] = [{ weekday: 1 }];
+
+    const result = mapClosedDates(closedWeekdayRows, [], "2026-09-07", "2026-09-13");
+
+    expect(result).toEqual(["2026-09-07"]);
+  });
+
+  it("特別休業日（特定日）と定休日（曜日）を統合し、重複を除いて昇順に並べる", () => {
+    const closedWeekdayRows: ClosedWeekdayRow[] = [{ weekday: 1 }]; // 2026-09-07(月)
+    const closedDateRows: ClosedDateRow[] = [
+      { closed_date: "2026-09-10" },
+      { closed_date: "2026-09-07" }, // 定休日と重複
+    ];
+
+    const result = mapClosedDates(closedWeekdayRows, closedDateRows, "2026-09-07", "2026-09-13");
+
+    expect(result).toEqual(["2026-09-07", "2026-09-10"]);
+  });
+
+  it("対象期間外の特別休業日は除外する", () => {
+    const closedDateRows: ClosedDateRow[] = [
+      { closed_date: "2026-08-31" }, // 期間より前
+      { closed_date: "2026-09-10" }, // 期間内
+    ];
+
+    const result = mapClosedDates([], closedDateRows, "2026-09-07", "2026-09-13");
+
+    expect(result).toEqual(["2026-09-10"]);
   });
 });
 

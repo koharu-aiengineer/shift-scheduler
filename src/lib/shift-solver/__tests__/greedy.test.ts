@@ -319,6 +319,43 @@ describe("buildGreedySolution: 週単位の需給比による目標人数の按�
   });
 });
 
+describe("buildGreedySolution: 店舗の定休日・特別休業日", () => {
+  it("closedDatesに含まれる日は必要人数を満たせなくても誰にも割り当てず、違反も記録しない", () => {
+    const employees = [employee("emp-a"), employee("emp-b")];
+    const input = baseInput({
+      employees,
+      staffingRequirements: [{ shiftTypeId: dayShift.id, defaultRequiredCount: 2, overrides: [] }],
+      closedDates: ["2026-09-07"],
+    });
+
+    const { assignments, violations } = buildGreedySolution(input);
+
+    expect(assignments.filter((a) => a.kind === "shift")).toHaveLength(0);
+    expect(assignments.every((a) => a.kind === "system_assigned_leave")).toBe(true);
+    expect(violations).toHaveLength(0);
+  });
+
+  it("特定日の必要人数上書きがあっても、closedDatesの方を優先して0にする", () => {
+    const employees = [employee("emp-a")];
+    const input = baseInput({
+      employees,
+      staffingRequirements: [
+        {
+          shiftTypeId: dayShift.id,
+          defaultRequiredCount: 1,
+          overrides: [{ date: "2026-09-07", requiredCount: 3 }],
+        },
+      ],
+      closedDates: ["2026-09-07"],
+    });
+
+    const { assignments, violations } = buildGreedySolution(input);
+
+    expect(assignments.filter((a) => a.kind === "shift")).toHaveLength(0);
+    expect(violations).toHaveLength(0);
+  });
+});
+
 describe("buildGreedySolution: 極端なケース（人数不足）", () => {
   it("従業員が1人しかおらず必要人数を満たせない場合、割当て可能な分だけ割り当てハード違反を記録する", () => {
     const employees = [employee("emp-a")];

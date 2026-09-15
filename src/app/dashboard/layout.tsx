@@ -22,6 +22,9 @@ export default function DashboardLayout({
           <Link href="/dashboard/leave-requests" className="hover:underline">
             休み希望・NG曜日
           </Link>
+          <Link href="/dashboard/store-settings" className="hover:underline">
+            店舗設定
+          </Link>
           <Link href="/dashboard/staffing-requirements" className="hover:underline">
             必要人数設定
           </Link>

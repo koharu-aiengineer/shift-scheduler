@@ -19,6 +19,8 @@ export type WriteShiftOutputInput = {
   employees: { id: string; name: string }[];
   shiftTypes: { id: string; name: string; color: string | null }[];
   assignments: Assignment[];
+  // 店舗の定休日・特別休業日。該当日は全員「定休日」と表示する。
+  closedDates?: ISODate[];
   // 新規作成したスプレッドシートIDをstores.output_sheet_idへ保存するためのコールバック
   onSpreadsheetCreated: (spreadsheetId: string) => Promise<void>;
 };
@@ -54,6 +56,7 @@ export async function writeShiftOutput(input: WriteShiftOutputInput): Promise<Wr
     employees: input.employees,
     shiftTypes: input.shiftTypes,
     assignments: input.assignments,
+    closedDates: input.closedDates,
   });
   const legend = buildCellLegend(input.shiftTypes);
 

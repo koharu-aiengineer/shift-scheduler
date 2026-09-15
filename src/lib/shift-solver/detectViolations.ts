@@ -12,7 +12,12 @@ export function detectViolations(assignments: Assignment[], input: SolverInput):
 
   const employeeById = new Map(input.employees.map((employee) => [employee.id, employee]));
   const dates = enumerateDates(input.periodStart, input.periodEnd);
-  const resolved = resolveRequirements(input.periodStart, input.periodEnd, input.staffingRequirements);
+  const resolved = resolveRequirements(
+    input.periodStart,
+    input.periodEnd,
+    input.staffingRequirements,
+    input.closedDates,
+  );
   const requirementLookup = buildRequirementLookup(resolved);
 
   // 休み希望・NG曜日はハード制約（ユーザー決定事項）。greedy.ts/localSearch.tsが

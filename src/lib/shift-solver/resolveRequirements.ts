@@ -10,12 +10,16 @@ export type ResolvedRequirement = {
 // デフォルト必要人数（shift_staffing_requirements）と特定日の上書き
 // （shift_staffing_overrides）から、期間内の日付×勤務区分ごとの
 // 必要人数を解決する。上書きが存在する日はそちらを優先する。
+// ただし店舗の定休日・特別休業日（closedDates）はそれよりさらに優先し、
+// 該当日は全勤務区分の必要人数を強制的に0にする。
 export function resolveRequirements(
   periodStart: ISODate,
   periodEnd: ISODate,
   staffingRequirements: StaffingRequirement[],
+  closedDates: ISODate[] = [],
 ): ResolvedRequirement[] {
   const dates = enumerateDates(periodStart, periodEnd);
+  const closedDateSet = new Set(closedDates);
   const resolved: ResolvedRequirement[] = [];
 
   for (const requirement of staffingRequirements) {
@@ -24,7 +28,9 @@ export function resolveRequirements(
     );
 
     for (const date of dates) {
-      const requiredCount = overrideByDate.get(date) ?? requirement.defaultRequiredCount;
+      const requiredCount = closedDateSet.has(date)
+        ? 0
+        : (overrideByDate.get(date) ?? requirement.defaultRequiredCount);
       resolved.push({ date, shiftTypeId: requirement.shiftTypeId, requiredCount });
     }
   }

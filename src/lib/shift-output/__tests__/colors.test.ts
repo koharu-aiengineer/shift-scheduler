@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildCellLegend,
   pickFallbackShiftColor,
+  CLOSED_DAY_COLOR,
   REQUESTED_LEAVE_COLOR,
   SYSTEM_ASSIGNED_LEAVE_COLOR,
 } from "../colors";
@@ -23,12 +24,13 @@ describe("buildCellLegend", () => {
     expect(legend).toContainEqual({ text: "遅番", color: pickFallbackShiftColor(1) });
   });
 
-  it("always includes 休 and 公休 with their fixed colors", () => {
+  it("always includes 休・公休・定休日 with their fixed colors", () => {
     const legend = buildCellLegend([]);
 
     expect(legend).toEqual([
       { text: "休", color: REQUESTED_LEAVE_COLOR },
       { text: "公休", color: SYSTEM_ASSIGNED_LEAVE_COLOR },
+      { text: "定休日", color: CLOSED_DAY_COLOR },
     ]);
   });
 });

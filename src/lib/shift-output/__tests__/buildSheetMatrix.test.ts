@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildSheetMatrix } from "../buildSheetMatrix";
-import { REQUESTED_LEAVE_COLOR, SYSTEM_ASSIGNED_LEAVE_COLOR } from "../colors";
+import { CLOSED_DAY_COLOR, REQUESTED_LEAVE_COLOR, SYSTEM_ASSIGNED_LEAVE_COLOR } from "../colors";
 import type { Assignment } from "../../shift-solver/types";
 
 const employees = [
@@ -92,6 +92,23 @@ describe("buildSheetMatrix", () => {
       text: "公休",
       backgroundColor: SYSTEM_ASSIGNED_LEAVE_COLOR,
     });
+  });
+
+  it("shows 定休日 for every employee on a closed date, overriding whatever assignment exists", () => {
+    const matrix = buildSheetMatrix({
+      periodStart: "2026-09-01",
+      periodEnd: "2026-09-01",
+      employees,
+      shiftTypes,
+      assignments: [
+        assignment({ employeeId: "emp-1", kind: "shift", shiftTypeId: "shift-early" }),
+        assignment({ employeeId: "emp-2", kind: "system_assigned_leave", shiftTypeId: null }),
+      ],
+      closedDates: ["2026-09-01"],
+    });
+
+    expect(matrix.rows[0].cells[0]).toEqual({ text: "定休日", backgroundColor: CLOSED_DAY_COLOR });
+    expect(matrix.rows[1].cells[0]).toEqual({ text: "定休日", backgroundColor: CLOSED_DAY_COLOR });
   });
 
   it("falls back to a blank cell when an assignment is missing for a given employee/date", () => {

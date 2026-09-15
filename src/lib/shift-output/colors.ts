@@ -13,6 +13,7 @@ export const FALLBACK_SHIFT_COLOR_PALETTE = [
 
 export const REQUESTED_LEAVE_COLOR = "#FEF3C7"; // amber-100（希望休＝本人申請）
 export const SYSTEM_ASSIGNED_LEAVE_COLOR = "#E5E7EB"; // gray-200（自動割振休＝システム割当）
+export const CLOSED_DAY_COLOR = "#D1D5DB"; // gray-300（定休日・特別休業日。公休より一段濃くして区別する）
 
 export function pickFallbackShiftColor(shiftTypeIndex: number): string {
   return FALLBACK_SHIFT_COLOR_PALETTE[shiftTypeIndex % FALLBACK_SHIFT_COLOR_PALETTE.length];
@@ -34,6 +35,7 @@ export function buildCellLegend(
     })),
     { text: "休", color: REQUESTED_LEAVE_COLOR },
     { text: "公休", color: SYSTEM_ASSIGNED_LEAVE_COLOR },
+    { text: "定休日", color: CLOSED_DAY_COLOR },
   ];
 }
 

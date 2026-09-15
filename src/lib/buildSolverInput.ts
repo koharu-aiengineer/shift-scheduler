@@ -8,6 +8,10 @@ import type {
   StaffingRequirement,
   SolverInput,
 } from "@/lib/shift-solver";
+// 実行時に必要なインポートは、vitestがパスエイリアスを解決できないため
+// （このファイルのテストは相対importで読み込む設計）相対パスで行う。
+// 型のみのインポート（上のimport type）はビルド時に消えるため問題ない。
+import { enumerateDates, getIsoWeekday } from "./shift-solver/dateUtils";
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -106,6 +110,30 @@ export function mapEmployees(
   }));
 }
 
+export type ClosedWeekdayRow = { weekday: number };
+export type ClosedDateRow = { closed_date: string };
+
+// 定休日（曜日）と特別休業日（特定日）を、対象期間内のISODate一覧に
+// 変換する（重複除去・昇順ソート）。
+export function mapClosedDates(
+  closedWeekdayRows: ClosedWeekdayRow[],
+  closedDateRows: ClosedDateRow[],
+  periodStart: ISODate,
+  periodEnd: ISODate,
+): ISODate[] {
+  const closedWeekdays = new Set(closedWeekdayRows.map((row) => row.weekday));
+  const dates = enumerateDates(periodStart, periodEnd);
+
+  const closedFromWeekdays = dates.filter(
+    (date) => closedWeekdays.has(getIsoWeekday(date)),
+  );
+  const closedFromDates = closedDateRows
+    .map((row) => row.closed_date)
+    .filter((date) => date >= periodStart && date <= periodEnd);
+
+  return [...new Set([...closedFromWeekdays, ...closedFromDates])].sort();
+}
+
 export type StaffingRequirementRow = {
   id: string; // shift_typeのid
   shift_staffing_requirements: { required_count: number }[] | { required_count: number } | null;
@@ -188,6 +216,20 @@ export async function buildSolverInputForStore(
     .eq("store_id", storeId);
   if (employeesError) throw new Error(employeesError.message);
 
+  const { data: closedWeekdayRows, error: closedWeekdaysError } = await supabase
+    .from("store_closed_weekdays")
+    .select("weekday")
+    .eq("store_id", storeId);
+  if (closedWeekdaysError) throw new Error(closedWeekdaysError.message);
+
+  const { data: closedDateRows, error: closedDatesError } = await supabase
+    .from("store_closed_dates")
+    .select("closed_date")
+    .eq("store_id", storeId)
+    .gte("closed_date", periodStart)
+    .lte("closed_date", periodEnd);
+  if (closedDatesError) throw new Error(closedDatesError.message);
+
   return {
     periodStart,
     periodEnd,
@@ -198,5 +240,6 @@ export async function buildSolverInputForStore(
     employmentTypeMinStaffing: mapEmploymentTypeMinStaffing(
       (employmentTypeRows ?? []) as EmploymentTypeRow[],
     ),
+    closedDates: mapClosedDates(closedWeekdayRows ?? [], closedDateRows ?? [], periodStart, periodEnd),
   };
 }

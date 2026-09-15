@@ -48,7 +48,12 @@ export function buildGreedySolution(input: SolverInput): GreedyResult {
   const shiftTypeById = new Map(input.shiftTypes.map((st) => [st.id, st]));
   const dates = enumerateDates(input.periodStart, input.periodEnd);
 
-  const resolved = resolveRequirements(input.periodStart, input.periodEnd, input.staffingRequirements);
+  const resolved = resolveRequirements(
+    input.periodStart,
+    input.periodEnd,
+    input.staffingRequirements,
+    input.closedDates,
+  );
   const requirementLookup = buildRequirementLookup(resolved);
 
   // 週あたり合計必要人数が、雇用形態の週稼働日数上限の合計（週あたりの

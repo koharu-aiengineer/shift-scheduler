@@ -25,6 +25,9 @@ export type BuildSheetMatrixInput = {
   employees: { id: string; name: string }[];
   shiftTypes: { id: string; name: string; color: string | null }[];
   assignments: Assignment[];
+  // 店舗の定休日・特別休業日。この日は割当ての内容に関わらず全員「定休日」と
+  // 表示する（店長画面ではなく出力用シート自体の表示。個人の公休と区別する）。
+  closedDates?: ISODate[];
 };
 
 // SolverOutput.assignments（純粋なドメインデータ）から、出力用シートに
@@ -32,6 +35,7 @@ export type BuildSheetMatrixInput = {
 // Google Sheets APIへの依存を持たないためモックデータだけで単体テストできる。
 export function buildSheetMatrix(input: BuildSheetMatrixInput): SheetMatrix {
   const dates = enumerateDates(input.periodStart, input.periodEnd);
+  const closedDateSet = new Set(input.closedDates ?? []);
 
   const shiftTypeNameById = new Map(input.shiftTypes.map((st) => [st.id, st.name]));
   const colorByText = new Map(
@@ -48,11 +52,13 @@ export function buildSheetMatrix(input: BuildSheetMatrixInput): SheetMatrix {
   const rows = input.employees.map((employee) => ({
     employeeName: employee.name,
     cells: dates.map((date) =>
-      buildCell(
-        assignmentByEmployeeAndDate.get(`${employee.id}:${date}`) ?? null,
-        shiftTypeNameById,
-        colorByText,
-      ),
+      closedDateSet.has(date)
+        ? { text: "定休日", backgroundColor: colorByText.get("定休日") ?? "#FFFFFF" }
+        : buildCell(
+            assignmentByEmployeeAndDate.get(`${employee.id}:${date}`) ?? null,
+            shiftTypeNameById,
+            colorByText,
+          ),
     ),
   }));
 

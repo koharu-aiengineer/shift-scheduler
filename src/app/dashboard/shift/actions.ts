@@ -91,6 +91,7 @@ export async function generateAndWriteShift(
       employees: employeeRows ?? [],
       shiftTypes: shiftTypeRows ?? [],
       assignments: solverOutput.assignments,
+      closedDates: solverInput.closedDates,
       onSpreadsheetCreated: async (spreadsheetId) => {
         const { error } = await supabase
           .from("stores")

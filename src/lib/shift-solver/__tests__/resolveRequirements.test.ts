@@ -39,6 +39,26 @@ describe("resolveRequirements", () => {
     ]);
   });
 
+  it("店舗の定休日・特別休業日（closedDates）は特定日の上書きより優先して0にする", () => {
+    const requirements: StaffingRequirement[] = [
+      {
+        shiftTypeId: "shift-a",
+        defaultRequiredCount: 2,
+        overrides: [{ date: "2026-09-02", requiredCount: 5 }],
+      },
+    ];
+
+    const resolved = resolveRequirements("2026-09-01", "2026-09-03", requirements, [
+      "2026-09-02",
+    ]);
+
+    expect(resolved).toEqual([
+      { date: "2026-09-01", shiftTypeId: "shift-a", requiredCount: 2 },
+      { date: "2026-09-02", shiftTypeId: "shift-a", requiredCount: 0 },
+      { date: "2026-09-03", shiftTypeId: "shift-a", requiredCount: 2 },
+    ]);
+  });
+
   it("複数の勤務区分をそれぞれ独立して解決する", () => {
     const requirements: StaffingRequirement[] = [
       { shiftTypeId: "shift-a", defaultRequiredCount: 1, overrides: [] },

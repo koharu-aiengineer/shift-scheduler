@@ -51,6 +51,9 @@ export type SolverInput = {
   employees: Employee[];
   staffingRequirements: StaffingRequirement[];
   employmentTypeMinStaffing: EmploymentTypeMinStaffing[];
+  // 店舗の定休日・特別休業日（店舗設定画面で登録）。この日は曜日別デフォルトや
+  // 特定日の必要人数上書きより優先して、全勤務区分の必要人数を0にする。
+  closedDates?: ISODate[];
   randomSeed?: number; // 再生成ボタン用。省略時は都度ランダムなシードを使う
 };
 
