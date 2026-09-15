@@ -18,6 +18,25 @@ export function pickFallbackShiftColor(shiftTypeIndex: number): string {
   return FALLBACK_SHIFT_COLOR_PALETTE[shiftTypeIndex % FALLBACK_SHIFT_COLOR_PALETTE.length];
 }
 
+export type CellLegendEntry = { text: string; color: string };
+
+// セルに入りうるテキスト（勤務区分名＋休＋公休）と、それぞれの背景色の対応表。
+// buildSheetMatrix（初回生成時の色）と buildEditingRequests（店長が手直しした
+// 際に自動で追従させる条件付き書式のルール）の両方が、この同じ対応表を使う
+// ことで色がズレないようにする。
+export function buildCellLegend(
+  shiftTypes: { name: string; color: string | null }[],
+): CellLegendEntry[] {
+  return [
+    ...shiftTypes.map((shiftType, index) => ({
+      text: shiftType.name,
+      color: shiftType.color ?? pickFallbackShiftColor(index),
+    })),
+    { text: "休", color: REQUESTED_LEAVE_COLOR },
+    { text: "公休", color: SYSTEM_ASSIGNED_LEAVE_COLOR },
+  ];
+}
+
 export type RgbColor = { red: number; green: number; blue: number };
 
 // Google Sheets APIのColor型は0〜1のfloatで指定する。

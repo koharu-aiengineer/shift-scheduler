@@ -1,10 +1,6 @@
 import { enumerateDates, getIsoWeekday } from "../shift-solver/dateUtils";
 import type { Assignment, ISODate } from "../shift-solver/types";
-import {
-  pickFallbackShiftColor,
-  REQUESTED_LEAVE_COLOR,
-  SYSTEM_ASSIGNED_LEAVE_COLOR,
-} from "./colors";
+import { buildCellLegend } from "./colors";
 
 const WEEKDAY_LABELS = ["月", "火", "水", "木", "金", "土", "日"] as const;
 
@@ -37,8 +33,9 @@ export type BuildSheetMatrixInput = {
 export function buildSheetMatrix(input: BuildSheetMatrixInput): SheetMatrix {
   const dates = enumerateDates(input.periodStart, input.periodEnd);
 
-  const shiftTypeById = new Map(
-    input.shiftTypes.map((st, index) => [st.id, { name: st.name, color: st.color, index }]),
+  const shiftTypeNameById = new Map(input.shiftTypes.map((st) => [st.id, st.name]));
+  const colorByText = new Map(
+    buildCellLegend(input.shiftTypes).map((entry) => [entry.text, entry.color]),
   );
 
   const assignmentByEmployeeAndDate = new Map<string, Assignment>();
@@ -51,7 +48,11 @@ export function buildSheetMatrix(input: BuildSheetMatrixInput): SheetMatrix {
   const rows = input.employees.map((employee) => ({
     employeeName: employee.name,
     cells: dates.map((date) =>
-      buildCell(assignmentByEmployeeAndDate.get(`${employee.id}:${date}`) ?? null, shiftTypeById),
+      buildCell(
+        assignmentByEmployeeAndDate.get(`${employee.id}:${date}`) ?? null,
+        shiftTypeNameById,
+        colorByText,
+      ),
     ),
   }));
 
@@ -60,7 +61,8 @@ export function buildSheetMatrix(input: BuildSheetMatrixInput): SheetMatrix {
 
 function buildCell(
   assignment: Assignment | null,
-  shiftTypeById: Map<string, { name: string; color: string | null; index: number }>,
+  shiftTypeNameById: Map<string, string>,
+  colorByText: Map<string, string>,
 ): SheetCell {
   if (!assignment) {
     // 通常は発生しない（ソルバーが全従業員・全日付分のAssignmentを返す前提）が、
@@ -68,19 +70,14 @@ function buildCell(
     return { text: "", backgroundColor: "#FFFFFF" };
   }
 
-  switch (assignment.kind) {
-    case "shift": {
-      const shiftType = shiftTypeById.get(assignment.shiftTypeId!);
-      return {
-        text: shiftType?.name ?? "?",
-        backgroundColor: shiftType?.color ?? pickFallbackShiftColor(shiftType?.index ?? 0),
-      };
-    }
-    case "requested_leave":
-      return { text: "休", backgroundColor: REQUESTED_LEAVE_COLOR };
-    case "system_assigned_leave":
-      return { text: "公休", backgroundColor: SYSTEM_ASSIGNED_LEAVE_COLOR };
-  }
+  const text =
+    assignment.kind === "shift"
+      ? (shiftTypeNameById.get(assignment.shiftTypeId!) ?? "?")
+      : assignment.kind === "requested_leave"
+        ? "休"
+        : "公休";
+
+  return { text, backgroundColor: colorByText.get(text) ?? "#FFFFFF" };
 }
 
 function formatDateLabel(date: ISODate): string {

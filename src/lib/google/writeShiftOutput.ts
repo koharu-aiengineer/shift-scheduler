@@ -1,7 +1,13 @@
 import { getAccessTokenForStore } from "./getAccessTokenForStore";
 import { createGoogleClients } from "./sheetsClient";
-import { buildClearFormatRequest, buildColorRequests } from "../shift-output/buildColorRequests";
+import {
+  buildClearFormatRequest,
+  buildConditionalFormatRequests,
+  buildDataValidationRequest,
+  buildDeleteConditionalFormatRequests,
+} from "../shift-output/buildSheetEditingRequests";
 import { buildSheetMatrix } from "../shift-output/buildSheetMatrix";
+import { buildCellLegend } from "../shift-output/colors";
 import type { Assignment, ISODate } from "../shift-solver/types";
 
 export type WriteShiftOutputInput = {
@@ -36,7 +42,11 @@ export async function writeShiftOutput(input: WriteShiftOutputInput): Promise<Wr
   }
 
   const sheetTitle = periodToSheetTitle(input.periodStart);
-  const sheetId = await ensureSheet(sheets, spreadsheetId, sheetTitle);
+  const { sheetId, existingConditionalFormatRuleCount } = await ensureSheet(
+    sheets,
+    spreadsheetId,
+    sheetTitle,
+  );
 
   const matrix = buildSheetMatrix({
     periodStart: input.periodStart,
@@ -45,6 +55,7 @@ export async function writeShiftOutput(input: WriteShiftOutputInput): Promise<Wr
     shiftTypes: input.shiftTypes,
     assignments: input.assignments,
   });
+  const legend = buildCellLegend(input.shiftTypes);
 
   const values = [
     matrix.headerRow,
@@ -58,10 +69,18 @@ export async function writeShiftOutput(input: WriteShiftOutputInput): Promise<Wr
     requestBody: { values },
   });
 
+  // 背景色は条件付き書式に任せる（店長がセルの値をドロップダウンや直接入力で
+  // 手直ししても、色が自動で追従するようにするため）。再生成のたびにルールが
+  // 積み重ならないよう、既存ルールを全て削除してから作り直す。
   await sheets.spreadsheets.batchUpdate({
     spreadsheetId,
     requestBody: {
-      requests: [buildClearFormatRequest(sheetId), ...buildColorRequests(sheetId, matrix)],
+      requests: [
+        buildClearFormatRequest(sheetId),
+        ...buildDeleteConditionalFormatRequests(sheetId, existingConditionalFormatRuleCount),
+        buildDataValidationRequest(sheetId, matrix, legend),
+        ...buildConditionalFormatRequests(sheetId, matrix, legend),
+      ],
     },
   });
 
@@ -91,16 +110,29 @@ async function createSpreadsheet(
   return spreadsheetId;
 }
 
+type EnsureSheetResult = {
+  sheetId: number;
+  // 既存タブが持つ条件付き書式ルールの件数（新規タブなら0）。
+  // 再生成時にこの件数分だけ削除してから、新しいルールを作り直す。
+  existingConditionalFormatRuleCount: number;
+};
+
 // 対象月のシート（タブ）が無ければ追加し、あればsheetIdを返す。
 async function ensureSheet(
   sheets: ReturnType<typeof createGoogleClients>["sheets"],
   spreadsheetId: string,
   sheetTitle: string,
-): Promise<number> {
-  const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId });
+): Promise<EnsureSheetResult> {
+  const spreadsheet = await sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: "sheets(properties(sheetId,title),conditionalFormats)",
+  });
   const existing = spreadsheet.data.sheets?.find((s) => s.properties?.title === sheetTitle);
   if (existing?.properties?.sheetId != null) {
-    return existing.properties.sheetId;
+    return {
+      sheetId: existing.properties.sheetId,
+      existingConditionalFormatRuleCount: existing.conditionalFormats?.length ?? 0,
+    };
   }
 
   const response = await sheets.spreadsheets.batchUpdate({
@@ -112,7 +144,7 @@ async function ensureSheet(
   if (sheetId == null) {
     throw new Error("出力用シートのタブ作成に失敗しました");
   }
-  return sheetId;
+  return { sheetId, existingConditionalFormatRuleCount: 0 };
 }
 
 function periodToSheetTitle(periodStart: ISODate): string {
