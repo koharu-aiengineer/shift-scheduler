@@ -20,10 +20,18 @@ export default async function EmployeesPage() {
     .order("name", { ascending: true });
   if (employmentTypesError) throw new Error(employmentTypesError.message);
 
+  // 雇用形態の登録順（作成日時が古い順）→ 氏名順に並べる。店舗は通常
+  // 「社員→パート→アルバイト」のように基幹となる雇用形態から登録していくため、
+  // 特定の名称をハードコードせずに意図した並び順を自動で再現できる。
+  // supabase-jsの.order(col, {foreignTable})は「埋め込んだ配列(1対多)の並び順」用で、
+  // employees→employment_typesのような多対1の関連先で親行を並べ替えるには効かない
+  // （実際に生成されるクエリを確認して判明）。PostgRESTの埋め込みリソース記法
+  // employment_types(created_at) をそのままカラム名として.order()に渡す必要がある。
   const { data: employees, error: employeesError } = await supabase
     .from("employees")
-    .select("id, name, employment_type_id, employment_types(name)")
+    .select("id, name, employment_type_id, employment_types(name, created_at)")
     .eq("store_id", store.id)
+    .order("employment_types(created_at)", { ascending: true })
     .order("name", { ascending: true });
   if (employeesError) throw new Error(employeesError.message);
 

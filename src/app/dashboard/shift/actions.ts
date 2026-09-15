@@ -5,6 +5,7 @@ import { getCurrentStore } from "@/lib/store";
 import { buildSolverInputForStore } from "@/lib/buildSolverInput";
 import { generateShift, type ConstraintViolation } from "@/lib/shift-solver";
 import { writeShiftOutput } from "@/lib/google/writeShiftOutput";
+import { computeDailyShiftCounts, type DailyShiftCount } from "@/lib/shift-output/computeDailyShiftCounts";
 
 export type GenerateShiftState = {
   status: "idle" | "success" | "error";
@@ -13,6 +14,9 @@ export type GenerateShiftState = {
   sheetTitle?: string;
   violations?: ConstraintViolation[];
   fairnessScore?: number;
+  // 日付ごと・勤務区分ごとの出勤人数。出力用スプレッドシートには書かず、
+  // 店長画面（このページ）にのみ表示する。
+  dailyShiftCounts?: DailyShiftCount[];
   // 生成が完了するたびに変わる値。再生成ボタンの確認状態をリセットするための
   // React key として使う（sheetTitle/spreadsheetUrlは同月なら毎回同じ値になるため使えない）。
   generatedAt?: string;
@@ -45,10 +49,18 @@ export async function generateAndWriteShift(
       periodEnd,
     );
 
+    // 雇用形態の登録順（作成日時が古い順）→ 氏名順に並べる。従業員一覧画面
+    // （dashboard/employees/page.tsx）と同じ並び順にするため、特定の名称を
+    // ハードコードせずに「基幹となる雇用形態から登録していく」慣習に乗せている。
+    // supabase-jsの.order(col, {foreignTable})は埋め込み配列(1対多)の並び順用で、
+    // employees→employment_typesのような多対1の関連先では親行の並びに効かないため、
+    // PostgRESTの埋め込みリソース記法をそのままカラム名として.order()に渡す
+    // （src/app/dashboard/employees/page.tsxと同じ理由・同じ書き方）。
     const { data: employeeRows, error: employeesError } = await supabase
       .from("employees")
-      .select("id, name")
+      .select("id, name, employment_types(created_at)")
       .eq("store_id", store.id)
+      .order("employment_types(created_at)", { ascending: true })
       .order("name", { ascending: true });
     if (employeesError) throw new Error(employeesError.message);
 
@@ -60,6 +72,13 @@ export async function generateAndWriteShift(
     if (shiftTypesError) throw new Error(shiftTypesError.message);
 
     const solverOutput = generateShift(solverInput);
+
+    const dailyShiftCounts = computeDailyShiftCounts({
+      periodStart,
+      periodEnd,
+      shiftTypes: shiftTypeRows ?? [],
+      assignments: solverOutput.assignments,
+    });
 
     const result = await writeShiftOutput({
       storeId: store.id,
@@ -84,6 +103,7 @@ export async function generateAndWriteShift(
       spreadsheetUrl: result.spreadsheetUrl,
       sheetTitle: result.sheetTitle,
       violations: solverOutput.violations,
+      dailyShiftCounts,
       fairnessScore: solverOutput.fairnessScore,
       generatedAt: new Date().toISOString(),
     };

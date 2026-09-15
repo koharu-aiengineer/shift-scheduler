@@ -5,6 +5,14 @@ import { generateAndWriteShift, type GenerateShiftState } from "./actions";
 
 const initialState: GenerateShiftState = { status: "idle" };
 
+const WEEKDAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"] as const;
+
+function formatDateLabel(date: string): string {
+  const [, month, day] = date.split("-");
+  const weekday = WEEKDAY_LABELS[new Date(`${date}T00:00:00Z`).getUTCDay()];
+  return `${Number(month)}/${Number(day)}(${weekday})`;
+}
+
 export function GenerateShiftForm() {
   const [state, formAction, isPending] = useActionState(generateAndWriteShift, initialState);
 
@@ -50,6 +58,40 @@ export function GenerateShiftForm() {
               スプレッドシートを開く
             </a>
           </p>
+
+          {state.dailyShiftCounts && state.dailyShiftCounts.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <h3 className="text-sm font-semibold text-gray-600">
+                日別 出勤数（店長画面のみの表示。出力用シートには含まれません）
+              </h3>
+              <div className="max-h-64 overflow-y-auto rounded border">
+                <table className="w-full text-left text-sm">
+                  <thead className="sticky top-0 bg-white">
+                    <tr className="border-b text-gray-500">
+                      <th className="px-2 py-1 font-normal">日付</th>
+                      {state.dailyShiftCounts[0].counts.map((c) => (
+                        <th key={c.shiftTypeId} className="px-2 py-1 font-normal">
+                          {c.shiftTypeName}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {state.dailyShiftCounts.map((day) => (
+                      <tr key={day.date} className="border-b last:border-0">
+                        <td className="px-2 py-1">{formatDateLabel(day.date)}</td>
+                        {day.counts.map((c) => (
+                          <td key={c.shiftTypeId} className="px-2 py-1">
+                            {c.count}人
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {state.violations && state.violations.length > 0 ? (
             <div className="flex flex-col gap-1">
