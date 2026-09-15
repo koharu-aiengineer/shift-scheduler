@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { generateAndWriteShift, type GenerateShiftState } from "./actions";
 
 const initialState: GenerateShiftState = { status: "idle" };
@@ -28,6 +28,9 @@ export function GenerateShiftForm() {
           {isPending ? "生成中..." : "シフトを生成"}
         </button>
       </form>
+      <p className="text-xs text-gray-500">
+        対象月に既に生成済みのタブがある場合、その内容（スプレッドシート上での手動修正を含む）は上書きされます。
+      </p>
 
       {state.status === "error" && (
         <p className="text-sm text-red-600">{state.error}</p>
@@ -64,8 +67,67 @@ export function GenerateShiftForm() {
               妥協した制約はありませんでした。
             </p>
           )}
+
+          <div className="flex flex-col gap-2 border-t pt-3">
+            <p className="text-xs text-gray-500">
+              再生成すると、{state.sheetTitle}
+              タブの内容（スプレッドシート上での手動修正を含む）が別パターンで上書きされます。手動修正が完了した後は再生成しないでください。
+            </p>
+            {/* generatedAtをkeyにして、生成が完了するたびに確認状態をリセットする */}
+            <RegenerateButton
+              key={state.generatedAt}
+              formAction={formAction}
+              period={state.sheetTitle!}
+              isPending={isPending}
+            />
+          </div>
         </div>
       )}
     </div>
+  );
+}
+
+function RegenerateButton({
+  formAction,
+  period,
+  isPending,
+}: {
+  formAction: (formData: FormData) => void;
+  period: string;
+  isPending: boolean;
+}) {
+  const [isConfirming, setIsConfirming] = useState(false);
+
+  return (
+    <form action={formAction} className="flex items-center gap-2">
+      <input type="hidden" name="period" value={period} />
+      {isConfirming ? (
+        <>
+          <button
+            type="submit"
+            disabled={isPending}
+            className="rounded bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700 disabled:opacity-50"
+          >
+            {isPending ? "生成中..." : "本当に上書きしますか？（クリックで実行）"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsConfirming(false)}
+            className="rounded border px-4 py-2 text-sm hover:bg-gray-50"
+          >
+            キャンセル
+          </button>
+        </>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setIsConfirming(true)}
+          disabled={isPending}
+          className="rounded border px-4 py-2 text-sm hover:bg-gray-50 disabled:opacity-50"
+        >
+          再生成
+        </button>
+      )}
+    </form>
   );
 }

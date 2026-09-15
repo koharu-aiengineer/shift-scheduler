@@ -13,6 +13,9 @@ export type GenerateShiftState = {
   sheetTitle?: string;
   violations?: ConstraintViolation[];
   fairnessScore?: number;
+  // 生成が完了するたびに変わる値。再生成ボタンの確認状態をリセットするための
+  // React key として使う（sheetTitle/spreadsheetUrlは同月なら毎回同じ値になるため使えない）。
+  generatedAt?: string;
 };
 
 export async function generateAndWriteShift(
@@ -82,6 +85,7 @@ export async function generateAndWriteShift(
       sheetTitle: result.sheetTitle,
       violations: solverOutput.violations,
       fairnessScore: solverOutput.fairnessScore,
+      generatedAt: new Date().toISOString(),
     };
   } catch (error) {
     return {
