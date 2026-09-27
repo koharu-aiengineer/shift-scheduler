@@ -9,15 +9,27 @@ type ShiftType = {
   start_time: string;
   end_time: string;
   color: string | null;
+  counts_toward_shift_type_id: string | null;
+  weekday_priority: boolean;
 };
 
-export function ShiftTypeRow({ shiftType }: { shiftType: ShiftType }) {
+type CountsTowardOption = { id: string; name: string };
+
+export function ShiftTypeRow({
+  shiftType,
+  countsTowardOptions,
+  countsTowardName,
+}: {
+  shiftType: ShiftType;
+  countsTowardOptions: CountsTowardOption[];
+  countsTowardName: string | null;
+}) {
   const [isEditing, setIsEditing] = useState(false);
 
   if (isEditing) {
     return (
       <tr className="border-b">
-        <td colSpan={5} className="py-2">
+        <td colSpan={7} className="py-2">
           <form
             action={async (formData) => {
               await updateShiftType(formData);
@@ -52,6 +64,27 @@ export function ShiftTypeRow({ shiftType }: { shiftType: ShiftType }) {
               required
               className="rounded border px-2 py-1"
             />
+            <select
+              name="counts_toward_shift_type_id"
+              defaultValue={shiftType.counts_toward_shift_type_id ?? ""}
+              className="rounded border px-2 py-1"
+            >
+              <option value="">合算先なし</option>
+              {countsTowardOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.name}に合算
+                </option>
+              ))}
+            </select>
+            <label className="flex items-center gap-1 text-sm">
+              <input
+                type="checkbox"
+                name="weekday_priority"
+                defaultChecked={shiftType.weekday_priority}
+                className="h-4 w-4"
+              />
+              平日優先
+            </label>
             <button
               type="submit"
               className="rounded bg-blue-600 px-3 py-1 text-white hover:bg-blue-700"
@@ -82,6 +115,10 @@ export function ShiftTypeRow({ shiftType }: { shiftType: ShiftType }) {
       <td className="py-2">{shiftType.name}</td>
       <td className="py-2">{shiftType.start_time.slice(0, 5)}</td>
       <td className="py-2">{shiftType.end_time.slice(0, 5)}</td>
+      <td className="py-2 text-gray-500">
+        {countsTowardName ? `→ ${countsTowardName}に合算` : "—"}
+      </td>
+      <td className="py-2 text-gray-500">{shiftType.weekday_priority ? "○" : "—"}</td>
       <td className="flex gap-3 py-2">
         <button
           onClick={() => setIsEditing(true)}

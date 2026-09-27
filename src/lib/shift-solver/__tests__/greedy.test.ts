@@ -317,6 +317,52 @@ describe("buildGreedySolution: 週単位の需給比による目標人数の按�
     const totalShifts = [...shiftCountByDate.values()].reduce((a, b) => a + b, 0);
     expect(totalShifts).toBeLessThanOrEqual(12);
   });
+
+  it("上限人数が設定されていても、週の需給が厳しい週では不足の週全体への分散が壊れない（供給量を超えない）", () => {
+    // 前のテストと同条件（供給12人日 < 需要21人日）に、上限人数（+2人ぶん）を
+    // 追加しても、按分の保証（週の供給量を超えない）が壊れないことを確認する。
+    const weeklyLimited: EmploymentType = {
+      ...freeType,
+      id: "et-weekly-limited",
+      maxWorkDaysPerWeek: 3,
+    };
+    const employees = [
+      employee("emp-1", { employmentTypeId: weeklyLimited.id }),
+      employee("emp-2", { employmentTypeId: weeklyLimited.id }),
+      employee("emp-3", { employmentTypeId: weeklyLimited.id }),
+      employee("emp-4", { employmentTypeId: weeklyLimited.id }),
+    ];
+    const input = baseInput({
+      periodStart: "2026-09-07",
+      periodEnd: "2026-09-13",
+      employees,
+      employmentTypes: [weeklyLimited],
+      staffingRequirements: [
+        { shiftTypeId: dayShift.id, defaultRequiredCount: 3, defaultMaxCount: 5, overrides: [] },
+      ],
+    });
+
+    const { assignments } = buildGreedySolution(input);
+
+    const shiftCountByDate = new Map<string, number>();
+    for (const a of assignments.filter((x) => x.kind === "shift")) {
+      shiftCountByDate.set(a.date, (shiftCountByDate.get(a.date) ?? 0) + 1);
+    }
+    const dates = [
+      "2026-09-07",
+      "2026-09-08",
+      "2026-09-09",
+      "2026-09-10",
+      "2026-09-11",
+      "2026-09-12",
+      "2026-09-13",
+    ];
+    for (const date of dates) {
+      expect(shiftCountByDate.get(date) ?? 0).toBeGreaterThan(0);
+    }
+    const totalShifts = [...shiftCountByDate.values()].reduce((a, b) => a + b, 0);
+    expect(totalShifts).toBeLessThanOrEqual(12);
+  });
 });
 
 describe("buildGreedySolution: 店舗の定休日・特別休業日", () => {
@@ -444,5 +490,427 @@ describe("buildGreedySolution: 極端なケース（人数不足）", () => {
         expect.objectContaining({ severity: "hard", type: "understaffed" }),
       ]),
     );
+  });
+});
+
+describe("buildGreedySolution: 勤務区分の合算先（グループ必要人数）", () => {
+  it("親とサブ区分の合計で必要人数を満たしていれば違反にならない", () => {
+    const subShift: ShiftType = {
+      ...dayShift,
+      id: "shift-day-part",
+      name: "早番パートバイト",
+      countsTowardShiftTypeId: dayShift.id,
+    };
+    const employees = [employee("emp-a"), employee("emp-b")];
+    const input = baseInput({
+      shiftTypes: [dayShift, subShift],
+      employees,
+      // 親(日勤A)の必要人数だけが「合計の目標」として使われる。
+      // サブ区分自身に必要人数を設定しても無視される想定。
+      staffingRequirements: [
+        { shiftTypeId: dayShift.id, defaultRequiredCount: 2, overrides: [] },
+        { shiftTypeId: subShift.id, defaultRequiredCount: 0, overrides: [] },
+      ],
+    });
+
+    const { assignments, violations } = buildGreedySolution(input);
+
+    const shiftAssignments = assignments.filter((a) => a.kind === "shift");
+    expect(shiftAssignments).toHaveLength(2);
+    expect(violations).toHaveLength(0);
+  });
+
+  it("親側の候補者が尽きていれば、サブ区分側で埋めて合計人数を満たす", () => {
+    const subShift: ShiftType = {
+      ...dayShift,
+      id: "shift-day-part",
+      name: "早番パートバイト",
+      countsTowardShiftTypeId: dayShift.id,
+    };
+    // 親（日勤A）にしか入れない雇用形態と、サブ区分にしか入れない雇用形態を用意し、
+    // 親側の候補が1人しかいなくても、サブ区分側の候補で合計2人に埋まることを確認する。
+    const parentOnly: EmploymentType = { ...freeType, id: "et-parent-only", forbiddenShiftTypeIds: [subShift.id] };
+    const subOnly: EmploymentType = { ...freeType, id: "et-sub-only", forbiddenShiftTypeIds: [dayShift.id] };
+    const employees = [
+      employee("emp-parent", { employmentTypeId: parentOnly.id }),
+      employee("emp-sub", { employmentTypeId: subOnly.id }),
+    ];
+    const input = baseInput({
+      shiftTypes: [dayShift, subShift],
+      employees,
+      employmentTypes: [freeType, parentOnly, subOnly],
+      staffingRequirements: [{ shiftTypeId: dayShift.id, defaultRequiredCount: 2, overrides: [] }],
+    });
+
+    const { assignments, violations } = buildGreedySolution(input);
+
+    const shiftAssignments = assignments.filter((a) => a.kind === "shift");
+    expect(shiftAssignments.map((a) => a.employeeId).sort()).toEqual(["emp-parent", "emp-sub"]);
+    expect(shiftAssignments.find((a) => a.employeeId === "emp-parent")?.shiftTypeId).toBe(dayShift.id);
+    expect(shiftAssignments.find((a) => a.employeeId === "emp-sub")?.shiftTypeId).toBe(subShift.id);
+    expect(violations).toHaveLength(0);
+  });
+
+  it("親とサブ区分の合計でも人数が足りない場合は、グループ全体として1件だけ不足violationを記録する", () => {
+    const subShift: ShiftType = {
+      ...dayShift,
+      id: "shift-day-part",
+      name: "早番パートバイト",
+      countsTowardShiftTypeId: dayShift.id,
+    };
+    const employees = [employee("emp-a")];
+    const input = baseInput({
+      shiftTypes: [dayShift, subShift],
+      employees,
+      staffingRequirements: [{ shiftTypeId: dayShift.id, defaultRequiredCount: 2, overrides: [] }],
+    });
+
+    const { assignments, violations } = buildGreedySolution(input);
+
+    expect(assignments.filter((a) => a.kind === "shift")).toHaveLength(1);
+    expect(violations).toEqual([
+      expect.objectContaining({
+        severity: "hard",
+        type: "understaffed",
+        shiftTypeId: dayShift.id,
+        message: expect.stringContaining("不足1人"),
+      }),
+    ]);
+  });
+
+  it("雇用形態別必須人数はグループ内の特定の勤務区分（親）に指定でき、合計人数の枠内で優先確保される", () => {
+    const subShift: ShiftType = {
+      ...dayShift,
+      id: "shift-day-part",
+      name: "早番パートバイト",
+      countsTowardShiftTypeId: dayShift.id,
+    };
+    const fulltime: EmploymentType = { ...freeType, id: "et-full" };
+    const parttime: EmploymentType = { ...freeType, id: "et-part" };
+    const employees = [
+      employee("emp-full", { employmentTypeId: fulltime.id }),
+      employee("emp-part", { employmentTypeId: parttime.id }),
+    ];
+    const input = baseInput({
+      shiftTypes: [dayShift, subShift],
+      employees,
+      employmentTypes: [fulltime, parttime],
+      staffingRequirements: [{ shiftTypeId: dayShift.id, defaultRequiredCount: 2, overrides: [] }],
+      // 社員(fulltime)は「親」(日勤A)に最低1人、という指定
+      employmentTypeMinStaffing: [
+        { employmentTypeId: fulltime.id, shiftTypeId: dayShift.id, minCount: 1 },
+      ],
+    });
+
+    const { assignments, violations } = buildGreedySolution(input);
+
+    const shiftAssignments = assignments.filter((a) => a.kind === "shift");
+    expect(shiftAssignments.find((a) => a.employeeId === "emp-full")?.shiftTypeId).toBe(dayShift.id);
+    expect(shiftAssignments).toHaveLength(2);
+    expect(violations).toHaveLength(0);
+  });
+});
+
+describe("buildGreedySolution: 上限人数（任意）による余裕があるときの追加割当て", () => {
+  it("上限人数が設定されていて候補者に余裕があれば、必要人数を超えて上限まで割り当てる", () => {
+    const employees = [employee("emp-a"), employee("emp-b"), employee("emp-c")];
+    const input = baseInput({
+      employees,
+      staffingRequirements: [
+        { shiftTypeId: dayShift.id, defaultRequiredCount: 1, defaultMaxCount: 3, overrides: [] },
+      ],
+    });
+
+    const { assignments, violations } = buildGreedySolution(input);
+
+    expect(assignments.filter((a) => a.kind === "shift")).toHaveLength(3);
+    expect(violations).toHaveLength(0);
+  });
+
+  it("上限人数が設定されていても、候補者が足りなければ無理に増やさず必要人数の充足だけを見る", () => {
+    const employees = [employee("emp-a")];
+    const input = baseInput({
+      employees,
+      staffingRequirements: [
+        { shiftTypeId: dayShift.id, defaultRequiredCount: 1, defaultMaxCount: 3, overrides: [] },
+      ],
+    });
+
+    const { assignments, violations } = buildGreedySolution(input);
+
+    expect(assignments.filter((a) => a.kind === "shift")).toHaveLength(1);
+    expect(violations).toHaveLength(0);
+  });
+
+  it("上限人数が未設定（null）なら、候補者に余裕があっても必要人数ちょうどまでしか割り当てない（従来どおり）", () => {
+    const employees = [employee("emp-a"), employee("emp-b"), employee("emp-c")];
+    const input = baseInput({
+      employees,
+      staffingRequirements: [{ shiftTypeId: dayShift.id, defaultRequiredCount: 1, overrides: [] }],
+    });
+
+    const { assignments } = buildGreedySolution(input);
+
+    expect(assignments.filter((a) => a.kind === "shift")).toHaveLength(1);
+  });
+});
+
+describe("buildGreedySolution: サブ区分のweekdayPriority（平日優先）", () => {
+  it("平日は、weekdayPriority: trueのサブ区分を親より先に埋めようとする", () => {
+    const subShift: ShiftType = {
+      ...dayShift,
+      id: "shift-day-part",
+      name: "早番パートバイト",
+      countsTowardShiftTypeId: dayShift.id,
+      weekdayPriority: true,
+    };
+    const employees = [employee("emp-a"), employee("emp-b")];
+    const input = baseInput({
+      periodStart: "2026-09-07", // 月曜
+      periodEnd: "2026-09-07",
+      shiftTypes: [dayShift, subShift],
+      employees,
+      staffingRequirements: [{ shiftTypeId: dayShift.id, defaultRequiredCount: 2, overrides: [] }],
+    });
+
+    const { assignments } = buildGreedySolution(input);
+
+    const shiftAssignments = assignments.filter((a) => a.kind === "shift");
+    expect(shiftAssignments).toHaveLength(2);
+    expect(shiftAssignments.every((a) => a.shiftTypeId === subShift.id)).toBe(true);
+  });
+
+  it("土日はweekdayPriorityの影響を受けず、従来どおり親を優先して埋める", () => {
+    const subShift: ShiftType = {
+      ...dayShift,
+      id: "shift-day-part",
+      name: "早番パートバイト",
+      countsTowardShiftTypeId: dayShift.id,
+      weekdayPriority: true,
+    };
+    const employees = [employee("emp-a"), employee("emp-b")];
+    const input = baseInput({
+      periodStart: "2026-09-12", // 土曜
+      periodEnd: "2026-09-12",
+      shiftTypes: [dayShift, subShift],
+      employees,
+      staffingRequirements: [{ shiftTypeId: dayShift.id, defaultRequiredCount: 2, overrides: [] }],
+    });
+
+    const { assignments } = buildGreedySolution(input);
+
+    const shiftAssignments = assignments.filter((a) => a.kind === "shift");
+    expect(shiftAssignments).toHaveLength(2);
+    expect(shiftAssignments.every((a) => a.shiftTypeId === dayShift.id)).toBe(true);
+  });
+
+  it("weekdayPriorityが設定されていても、埋めきれない分は通常どおり他メンバーに回る", () => {
+    const subShift: ShiftType = {
+      ...dayShift,
+      id: "shift-day-part",
+      name: "早番パートバイト",
+      countsTowardShiftTypeId: dayShift.id,
+      weekdayPriority: true,
+    };
+    // サブ区分にしか入れない従業員1人 + 親にしか入れない従業員1人
+    const subOnly: EmploymentType = { ...freeType, id: "et-sub-only", forbiddenShiftTypeIds: [dayShift.id] };
+    const parentOnly: EmploymentType = { ...freeType, id: "et-parent-only", forbiddenShiftTypeIds: [subShift.id] };
+    const employees = [
+      employee("emp-sub", { employmentTypeId: subOnly.id }),
+      employee("emp-parent", { employmentTypeId: parentOnly.id }),
+    ];
+    const input = baseInput({
+      periodStart: "2026-09-07", // 月曜
+      periodEnd: "2026-09-07",
+      shiftTypes: [dayShift, subShift],
+      employees,
+      employmentTypes: [freeType, subOnly, parentOnly],
+      staffingRequirements: [{ shiftTypeId: dayShift.id, defaultRequiredCount: 2, overrides: [] }],
+    });
+
+    const { assignments, violations } = buildGreedySolution(input);
+
+    const shiftAssignments = assignments.filter((a) => a.kind === "shift");
+    expect(shiftAssignments.find((a) => a.employeeId === "emp-sub")?.shiftTypeId).toBe(subShift.id);
+    expect(shiftAssignments.find((a) => a.employeeId === "emp-parent")?.shiftTypeId).toBe(dayShift.id);
+    expect(violations).toHaveLength(0);
+  });
+});
+
+describe("buildGreedySolution: 雇用形態の月間目標時間（任意）による優先順位づけ", () => {
+  it("目標時間に達していない従業員を、達している／目標未設定の従業員より優先して割り当てる", () => {
+    // dayShiftは8時間。targeted(目標16時間)は最初の2日で目標に達し、
+    // 3日目は目標未設定のnoTargetの方が（従来どおり勤務日数の少なさで）優先されるはず。
+    const targeted: EmploymentType = { ...freeType, id: "et-targeted", targetMonthlyHours: 16 };
+    const noTarget: EmploymentType = { ...freeType, id: "et-no-target" };
+    const employees = [
+      employee("emp-targeted", { employmentTypeId: targeted.id }),
+      employee("emp-no-target", { employmentTypeId: noTarget.id }),
+    ];
+    const input = baseInput({
+      periodStart: "2026-09-07",
+      periodEnd: "2026-09-09",
+      employees,
+      employmentTypes: [targeted, noTarget],
+      staffingRequirements: [{ shiftTypeId: dayShift.id, defaultRequiredCount: 1, overrides: [] }],
+    });
+
+    const { assignments } = buildGreedySolution(input);
+
+    const shiftsByDate = new Map(
+      assignments.filter((a) => a.kind === "shift").map((a) => [a.date, a.employeeId]),
+    );
+    expect(shiftsByDate.get("2026-09-07")).toBe("emp-targeted");
+    expect(shiftsByDate.get("2026-09-08")).toBe("emp-targeted");
+    // 2日目終了時点でemp-targetedは16時間に達しているため、3日目は
+    // 従来どおりの公平性（勤務日数が少ない方）でemp-no-targetが優先される
+    expect(shiftsByDate.get("2026-09-09")).toBe("emp-no-target");
+  });
+
+  it("目標時間が未設定（null）なら、従来どおり勤務日数の公平性だけで順序を決める", () => {
+    const employees = [employee("emp-a"), employee("emp-b")];
+    const input = baseInput({
+      periodStart: "2026-09-07",
+      periodEnd: "2026-09-08",
+      employees,
+      staffingRequirements: [{ shiftTypeId: dayShift.id, defaultRequiredCount: 1, overrides: [] }],
+    });
+
+    const { assignments } = buildGreedySolution(input);
+
+    const shiftsByDate = new Map(
+      assignments.filter((a) => a.kind === "shift").map((a) => [a.date, a.employeeId]),
+    );
+    // 目標未設定なので、勤務日数の少ない方が交互に選ばれる（従来どおり）
+    expect(shiftsByDate.get("2026-09-07")).not.toBe(shiftsByDate.get("2026-09-08"));
+  });
+
+  it("平日優先（weekdayPriority）のサブ区分に入れない雇用形態でも、目標未達なら親（本体）を優先して割り当てる", () => {
+    // サブ区分に入れない雇用形態（例: 社員）が目標時間未達の場合、
+    // weekdayPriorityでサブ区分が先に埋まってしまい親（本体）の枠が
+    // 残らない、ということがないようにする（Step2aで親を先に確保する）。
+    const subShift: ShiftType = {
+      ...dayShift,
+      id: "shift-day-part",
+      name: "早番パートバイト",
+      countsTowardShiftTypeId: dayShift.id,
+      weekdayPriority: true,
+    };
+    const targeted: EmploymentType = {
+      ...freeType,
+      id: "et-targeted",
+      targetMonthlyHours: 100,
+      forbiddenShiftTypeIds: [subShift.id],
+    };
+    const employees = [
+      employee("emp-targeted", { employmentTypeId: targeted.id }),
+      employee("emp-free"),
+    ];
+    const input = baseInput({
+      periodStart: "2026-09-07", // 月曜
+      periodEnd: "2026-09-07",
+      shiftTypes: [dayShift, subShift],
+      employees,
+      employmentTypes: [freeType, targeted],
+      staffingRequirements: [{ shiftTypeId: dayShift.id, defaultRequiredCount: 2, overrides: [] }],
+    });
+
+    const { assignments, violations } = buildGreedySolution(input);
+
+    const shiftAssignments = assignments.filter((a) => a.kind === "shift");
+    expect(shiftAssignments.find((a) => a.employeeId === "emp-targeted")?.shiftTypeId).toBe(dayShift.id);
+    expect(shiftAssignments.find((a) => a.employeeId === "emp-free")?.shiftTypeId).toBe(subShift.id);
+    expect(violations).toHaveLength(0);
+  });
+
+  it("複数の勤務区分（グループ）が同じ雇用形態の必須人数を要求している場合、目標時間の優先割当てが一方の必須人数を枯渇させない", () => {
+    // shiftA・shiftBはそれぞれ独立したグループ（合算関係なし）で、両方とも
+    // targeted（目標時間999時間＝常に未達扱い）に最低1人を要求している。
+    // targetedが2人しかいない状況で、Step2の目標時間優先割当てが片方の
+    // グループに両方のtargetedを取り込んでしまうと、もう片方のグループの
+    // 必須人数が満たせなくなる（このリグレッションを防ぐための回帰テスト）。
+    const shiftA: ShiftType = { ...dayShift, id: "shift-a", name: "シフトA" };
+    const shiftB: ShiftType = { ...dayShift, id: "shift-b", name: "シフトB" };
+    const targeted: EmploymentType = { ...freeType, id: "et-targeted", targetMonthlyHours: 999 };
+    const employees = [
+      employee("emp-targeted-1", { employmentTypeId: targeted.id }),
+      employee("emp-targeted-2", { employmentTypeId: targeted.id }),
+      employee("emp-filler"),
+    ];
+    const input = baseInput({
+      periodStart: "2026-09-07",
+      periodEnd: "2026-09-07",
+      shiftTypes: [shiftA, shiftB],
+      employees,
+      employmentTypes: [freeType, targeted],
+      staffingRequirements: [
+        { shiftTypeId: shiftA.id, defaultRequiredCount: 2, overrides: [] },
+        { shiftTypeId: shiftB.id, defaultRequiredCount: 1, overrides: [] },
+      ],
+      employmentTypeMinStaffing: [
+        { employmentTypeId: targeted.id, shiftTypeId: shiftA.id, minCount: 1 },
+        { employmentTypeId: targeted.id, shiftTypeId: shiftB.id, minCount: 1 },
+      ],
+    });
+
+    const { violations } = buildGreedySolution(input);
+
+    expect(violations.filter((v) => v.type === "employment_type_min_understaffed")).toHaveLength(0);
+  });
+});
+
+describe("buildGreedySolution: 雇用形態×勤務区分の土日限定の上限人数", () => {
+  it("土曜・日曜は、上限人数を超えてその雇用形態を割り当てない（他に埋める候補がいなければ不足になる）", () => {
+    const limited: EmploymentType = { ...freeType, id: "et-limited" };
+    const employees = [
+      employee("emp-1", { employmentTypeId: limited.id }),
+      employee("emp-2", { employmentTypeId: limited.id }),
+      employee("emp-3", { employmentTypeId: limited.id }),
+    ];
+    const input = baseInput({
+      periodStart: "2026-09-12", // 土曜
+      periodEnd: "2026-09-12",
+      employees,
+      employmentTypes: [limited],
+      staffingRequirements: [{ shiftTypeId: dayShift.id, defaultRequiredCount: 3, overrides: [] }],
+      employmentTypeWeekendMaxStaffing: [
+        { employmentTypeId: limited.id, shiftTypeId: dayShift.id, maxCount: 2 },
+      ],
+    });
+
+    const { assignments, violations } = buildGreedySolution(input);
+
+    expect(assignments.filter((a) => a.kind === "shift")).toHaveLength(2);
+    expect(violations).toEqual([
+      expect.objectContaining({
+        severity: "hard",
+        type: "understaffed",
+        message: expect.stringContaining("不足1人"),
+      }),
+    ]);
+  });
+
+  it("平日は土日限定の上限人数の影響を受けない", () => {
+    const limited: EmploymentType = { ...freeType, id: "et-limited" };
+    const employees = [
+      employee("emp-1", { employmentTypeId: limited.id }),
+      employee("emp-2", { employmentTypeId: limited.id }),
+      employee("emp-3", { employmentTypeId: limited.id }),
+    ];
+    const input = baseInput({
+      periodStart: "2026-09-07", // 月曜
+      periodEnd: "2026-09-07",
+      employees,
+      employmentTypes: [limited],
+      staffingRequirements: [{ shiftTypeId: dayShift.id, defaultRequiredCount: 3, overrides: [] }],
+      employmentTypeWeekendMaxStaffing: [
+        { employmentTypeId: limited.id, shiftTypeId: dayShift.id, maxCount: 2 },
+      ],
+    });
+
+    const { assignments, violations } = buildGreedySolution(input);
+
+    expect(assignments.filter((a) => a.kind === "shift")).toHaveLength(3);
+    expect(violations).toHaveLength(0);
   });
 });

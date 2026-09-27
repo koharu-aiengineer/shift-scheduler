@@ -3,6 +3,7 @@ import type {
   Employee,
   EmploymentType,
   EmploymentTypeMinStaffing,
+  EmploymentTypeWeekendMaxStaffing,
   ISODate,
   ShiftType,
   StaffingRequirement,
@@ -25,6 +26,8 @@ export type ShiftTypeRow = {
   name: string;
   start_time: string; // "HH:MM:SS"（Postgresのtime型）
   end_time: string;
+  counts_toward_shift_type_id: string | null;
+  weekday_priority: boolean;
 };
 
 export function mapShiftTypes(rows: ShiftTypeRow[]): ShiftType[] {
@@ -33,6 +36,8 @@ export function mapShiftTypes(rows: ShiftTypeRow[]): ShiftType[] {
     name: row.name,
     startTime: toHHMM(row.start_time),
     endTime: toHHMM(row.end_time),
+    countsTowardShiftTypeId: row.counts_toward_shift_type_id,
+    weekdayPriority: row.weekday_priority,
   }));
 }
 
@@ -48,11 +53,21 @@ export type EmploymentTypeRow = {
         max_work_days_per_week: number | null;
         max_work_hours_per_week: number | null;
         max_consecutive_work_days: number | null;
+        target_monthly_hours: number | null;
       }[]
-    | { max_work_days_per_week: number | null; max_work_hours_per_week: number | null; max_consecutive_work_days: number | null }
+    | {
+        max_work_days_per_week: number | null;
+        max_work_hours_per_week: number | null;
+        max_consecutive_work_days: number | null;
+        target_monthly_hours: number | null;
+      }
     | null;
   employment_type_shift_restrictions: { shift_type_id: string }[];
-  employment_type_shift_staffing_requirements: { shift_type_id: string; min_count: number }[];
+  employment_type_shift_staffing_requirements: {
+    shift_type_id: string;
+    min_count: number | null;
+    max_count_weekend: number | null;
+  }[];
 };
 
 export function mapEmploymentTypes(rows: EmploymentTypeRow[]): EmploymentType[] {
@@ -67,6 +82,7 @@ export function mapEmploymentTypes(rows: EmploymentTypeRow[]): EmploymentType[] 
       maxWorkDaysPerWeek: rule?.max_work_days_per_week ?? null,
       maxWorkHoursPerWeek: rule?.max_work_hours_per_week ?? null,
       maxConsecutiveWorkDays: rule?.max_consecutive_work_days ?? null,
+      targetMonthlyHours: rule?.target_monthly_hours ?? null,
       forbiddenShiftTypeIds: (row.employment_type_shift_restrictions ?? []).map(
         (r) => r.shift_type_id,
       ),
@@ -76,11 +92,27 @@ export function mapEmploymentTypes(rows: EmploymentTypeRow[]): EmploymentType[] 
 
 export function mapEmploymentTypeMinStaffing(rows: EmploymentTypeRow[]): EmploymentTypeMinStaffing[] {
   return rows.flatMap((row) =>
-    (row.employment_type_shift_staffing_requirements ?? []).map((requirement) => ({
-      employmentTypeId: row.id,
-      shiftTypeId: requirement.shift_type_id,
-      minCount: requirement.min_count,
-    })),
+    (row.employment_type_shift_staffing_requirements ?? [])
+      .filter((requirement) => requirement.min_count != null)
+      .map((requirement) => ({
+        employmentTypeId: row.id,
+        shiftTypeId: requirement.shift_type_id,
+        minCount: requirement.min_count as number,
+      })),
+  );
+}
+
+export function mapEmploymentTypeWeekendMaxStaffing(
+  rows: EmploymentTypeRow[],
+): EmploymentTypeWeekendMaxStaffing[] {
+  return rows.flatMap((row) =>
+    (row.employment_type_shift_staffing_requirements ?? [])
+      .filter((requirement) => requirement.max_count_weekend != null)
+      .map((requirement) => ({
+        employmentTypeId: row.id,
+        shiftTypeId: requirement.shift_type_id,
+        maxCount: requirement.max_count_weekend as number,
+      })),
   );
 }
 
@@ -136,7 +168,10 @@ export function mapClosedDates(
 
 export type StaffingRequirementRow = {
   id: string; // shift_typeのid
-  shift_staffing_requirements: { required_count: number }[] | { required_count: number } | null;
+  shift_staffing_requirements:
+    | { required_count: number; max_count: number | null }[]
+    | { required_count: number; max_count: number | null }
+    | null;
 };
 
 export type StaffingOverrideRow = {
@@ -164,6 +199,7 @@ export function mapStaffingRequirements(
     return {
       shiftTypeId: row.id,
       defaultRequiredCount: requirement?.required_count ?? 0,
+      defaultMaxCount: requirement?.max_count ?? null,
       overrides: overridesByShiftType.get(row.id) ?? [],
     };
   });
@@ -183,7 +219,9 @@ export async function buildSolverInputForStore(
 ): Promise<SolverInput> {
   const { data: shiftTypeRows, error: shiftTypesError } = await supabase
     .from("shift_types")
-    .select("id, name, start_time, end_time, shift_staffing_requirements(required_count)")
+    .select(
+      "id, name, start_time, end_time, counts_toward_shift_type_id, weekday_priority, shift_staffing_requirements(required_count, max_count)",
+    )
     .eq("store_id", storeId)
     .order("start_time", { ascending: true });
   if (shiftTypesError) throw new Error(shiftTypesError.message);
@@ -203,7 +241,7 @@ export async function buildSolverInputForStore(
   const { data: employmentTypeRows, error: employmentTypesError } = await supabase
     .from("employment_types")
     .select(
-      "id, name, employment_type_rules(max_work_days_per_week, max_work_hours_per_week, max_consecutive_work_days), employment_type_shift_restrictions(shift_type_id), employment_type_shift_staffing_requirements(shift_type_id, min_count)",
+      "id, name, employment_type_rules(max_work_days_per_week, max_work_hours_per_week, max_consecutive_work_days, target_monthly_hours), employment_type_shift_restrictions(shift_type_id), employment_type_shift_staffing_requirements(shift_type_id, min_count, max_count_weekend)",
     )
     .eq("store_id", storeId);
   if (employmentTypesError) throw new Error(employmentTypesError.message);
@@ -238,6 +276,9 @@ export async function buildSolverInputForStore(
     employees: mapEmployees((employeeRows ?? []) as EmployeeRow[], periodStart, periodEnd),
     staffingRequirements: mapStaffingRequirements(shiftTypeRows ?? [], overrideRows ?? []),
     employmentTypeMinStaffing: mapEmploymentTypeMinStaffing(
+      (employmentTypeRows ?? []) as EmploymentTypeRow[],
+    ),
+    employmentTypeWeekendMaxStaffing: mapEmploymentTypeWeekendMaxStaffing(
       (employmentTypeRows ?? []) as EmploymentTypeRow[],
     ),
     closedDates: mapClosedDates(closedWeekdayRows ?? [], closedDateRows ?? [], periodStart, periodEnd),

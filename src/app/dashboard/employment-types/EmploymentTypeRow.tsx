@@ -19,8 +19,10 @@ export type EmploymentTypeListItem = {
   maxWorkDaysPerWeek: number | null;
   maxWorkHoursPerWeek: number | null;
   maxConsecutiveWorkDays: number | null;
+  targetMonthlyHours: number | null;
   restrictedShiftTypeNames: string[];
   requirementSummaries: string[];
+  weekendMaxSummaries: string[];
 };
 
 export function EmploymentTypeRow({
@@ -71,7 +73,8 @@ export function EmploymentTypeRow({
       <div className="text-sm text-gray-600">
         週最大勤務日数: {employmentType.maxWorkDaysPerWeek ?? "未設定"} / 週最大勤務時間:{" "}
         {employmentType.maxWorkHoursPerWeek ?? "未設定"} / 連勤上限:{" "}
-        {employmentType.maxConsecutiveWorkDays ?? "未設定"}
+        {employmentType.maxConsecutiveWorkDays ?? "未設定"} / 月間目標時間:{" "}
+        {employmentType.targetMonthlyHours ?? "未設定"}
       </div>
       {employmentType.restrictedShiftTypeNames.length > 0 && (
         <div className="text-sm text-gray-600">
@@ -81,6 +84,11 @@ export function EmploymentTypeRow({
       {employmentType.requirementSummaries.length > 0 && (
         <div className="text-sm text-gray-600">
           必須配置人数: {employmentType.requirementSummaries.join("、")}
+        </div>
+      )}
+      {employmentType.weekendMaxSummaries.length > 0 && (
+        <div className="text-sm text-gray-600">
+          土日の上限人数: {employmentType.weekendMaxSummaries.join("、")}
         </div>
       )}
     </li>

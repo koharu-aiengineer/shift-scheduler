@@ -11,6 +11,7 @@ export type {
   Employee,
   EmploymentType,
   EmploymentTypeMinStaffing,
+  EmploymentTypeWeekendMaxStaffing,
   ISODate,
   ShiftType,
   SolverInput,

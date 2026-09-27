@@ -31,6 +31,7 @@ type ShiftSetting = {
   shiftTypeId: string;
   restricted: boolean;
   minCount: number | null;
+  weekendMaxCount: number | null;
 };
 
 function collectShiftSettings(
@@ -44,7 +45,17 @@ function collectShiftSettings(
       typeof minCountRaw === "string" && minCountRaw.trim().length > 0
         ? Number.parseInt(minCountRaw, 10)
         : null;
-    return { shiftTypeId, restricted, minCount: minCount && minCount > 0 ? minCount : null };
+    const weekendMaxRaw = formData.get(`weekend_max_${shiftTypeId}`);
+    const weekendMaxCount =
+      typeof weekendMaxRaw === "string" && weekendMaxRaw.trim().length > 0
+        ? Number.parseInt(weekendMaxRaw, 10)
+        : null;
+    return {
+      shiftTypeId,
+      restricted,
+      minCount: minCount && minCount > 0 ? minCount : null,
+      weekendMaxCount: weekendMaxCount != null && weekendMaxCount >= 0 ? weekendMaxCount : null,
+    };
   });
 }
 
@@ -76,11 +87,12 @@ async function saveShiftSettings(
   }
 
   const requirements = settings
-    .filter((s) => s.minCount !== null)
+    .filter((s) => s.minCount !== null || s.weekendMaxCount !== null)
     .map((s) => ({
       employment_type_id: employmentTypeId,
       shift_type_id: s.shiftTypeId,
       min_count: s.minCount,
+      max_count_weekend: s.weekendMaxCount,
     }));
   if (requirements.length > 0) {
     const { error } = await supabase
@@ -98,6 +110,7 @@ export async function createEmploymentType(formData: FormData) {
   const maxWorkDaysPerWeek = optionalInt(formData, "max_work_days_per_week");
   const maxWorkHoursPerWeek = optionalFloat(formData, "max_work_hours_per_week");
   const maxConsecutiveWorkDays = optionalInt(formData, "max_consecutive_work_days");
+  const targetMonthlyHours = optionalFloat(formData, "target_monthly_hours");
 
   const supabase = await createClient();
 
@@ -119,6 +132,7 @@ export async function createEmploymentType(formData: FormData) {
     max_work_days_per_week: maxWorkDaysPerWeek,
     max_work_hours_per_week: maxWorkHoursPerWeek,
     max_consecutive_work_days: maxConsecutiveWorkDays,
+    target_monthly_hours: targetMonthlyHours,
   });
   if (ruleError) throw new Error(ruleError.message);
 
@@ -138,6 +152,7 @@ export async function updateEmploymentType(formData: FormData) {
   const maxWorkDaysPerWeek = optionalInt(formData, "max_work_days_per_week");
   const maxWorkHoursPerWeek = optionalFloat(formData, "max_work_hours_per_week");
   const maxConsecutiveWorkDays = optionalInt(formData, "max_consecutive_work_days");
+  const targetMonthlyHours = optionalFloat(formData, "target_monthly_hours");
 
   const supabase = await createClient();
 
@@ -160,6 +175,7 @@ export async function updateEmploymentType(formData: FormData) {
       max_work_days_per_week: maxWorkDaysPerWeek,
       max_work_hours_per_week: maxWorkHoursPerWeek,
       max_consecutive_work_days: maxConsecutiveWorkDays,
+      target_monthly_hours: targetMonthlyHours,
     })
     .eq("employment_type_id", id);
   if (ruleError) throw new Error(ruleError.message);

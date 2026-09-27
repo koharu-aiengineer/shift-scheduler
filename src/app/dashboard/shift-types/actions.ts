@@ -13,6 +13,12 @@ function requireString(formData: FormData, field: string, label: string): string
   return value.trim();
 }
 
+function optionalString(formData: FormData, field: string): string | null {
+  const value = formData.get(field);
+  if (typeof value !== "string" || value.trim().length === 0) return null;
+  return value.trim();
+}
+
 export async function createShiftType(formData: FormData) {
   const store = await getCurrentStore();
   if (!store) throw new Error("店舗が見つかりません");
@@ -21,6 +27,8 @@ export async function createShiftType(formData: FormData) {
   const startTime = requireString(formData, "start_time", "開始時刻");
   const endTime = requireString(formData, "end_time", "終了時刻");
   const color = requireString(formData, "color", "色");
+  const countsTowardShiftTypeId = optionalString(formData, "counts_toward_shift_type_id");
+  const weekdayPriority = formData.get("weekday_priority") === "on";
 
   const supabase = await createClient();
   const { error } = await supabase.from("shift_types").insert({
@@ -29,11 +37,14 @@ export async function createShiftType(formData: FormData) {
     start_time: startTime,
     end_time: endTime,
     color,
+    counts_toward_shift_type_id: countsTowardShiftTypeId,
+    weekday_priority: weekdayPriority,
   });
 
   if (error) throw toFriendlyInsertError(error, `「${name}」という名称の勤務区分は既に登録されています`);
 
   revalidatePath("/dashboard/shift-types");
+  revalidatePath("/dashboard/staffing-requirements");
 }
 
 export async function updateShiftType(formData: FormData) {
@@ -45,17 +56,31 @@ export async function updateShiftType(formData: FormData) {
   const startTime = requireString(formData, "start_time", "開始時刻");
   const endTime = requireString(formData, "end_time", "終了時刻");
   const color = requireString(formData, "color", "色");
+  const countsTowardShiftTypeId = optionalString(formData, "counts_toward_shift_type_id");
+  const weekdayPriority = formData.get("weekday_priority") === "on";
+
+  if (countsTowardShiftTypeId === id) {
+    throw new Error("合算先に自分自身は選べません");
+  }
 
   const supabase = await createClient();
   const { error } = await supabase
     .from("shift_types")
-    .update({ name, start_time: startTime, end_time: endTime, color })
+    .update({
+      name,
+      start_time: startTime,
+      end_time: endTime,
+      color,
+      counts_toward_shift_type_id: countsTowardShiftTypeId,
+      weekday_priority: weekdayPriority,
+    })
     .eq("id", id)
     .eq("store_id", store.id);
 
   if (error) throw toFriendlyInsertError(error, `「${name}」という名称の勤務区分は既に登録されています`);
 
   revalidatePath("/dashboard/shift-types");
+  revalidatePath("/dashboard/staffing-requirements");
 }
 
 export async function deleteShiftType(formData: FormData) {

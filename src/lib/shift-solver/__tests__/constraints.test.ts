@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildShiftTypeGroups,
   canAssignShift,
   computeShiftHours,
   findUnmetEmploymentTypeMinStaffing,
@@ -167,5 +168,29 @@ describe("findUnmetEmploymentTypeMinStaffing", () => {
     );
 
     expect(unmet).toHaveLength(1);
+  });
+});
+
+describe("buildShiftTypeGroups", () => {
+  it("合算先を持たない勤務区分は、それぞれ単独のグループになる", () => {
+    const nightShift: ShiftType = { ...dayShift, id: "shift-night", name: "遅番" };
+    const groups = buildShiftTypeGroups([dayShift, nightShift]);
+
+    expect(groups).toEqual([{ members: [dayShift] }, { members: [nightShift] }]);
+  });
+
+  it("合算先を持つ勤務区分は、親のグループのメンバーに含まれる（親が先頭）", () => {
+    const partTime: ShiftType = { ...dayShift, id: "shift-day-part", name: "早番パートバイト", countsTowardShiftTypeId: "shift-day" };
+    const groups = buildShiftTypeGroups([partTime, dayShift]);
+
+    expect(groups).toEqual([{ members: [dayShift, partTime] }]);
+  });
+
+  it("同じ親を持つサブ区分が複数あれば、すべて同じグループにまとまる", () => {
+    const partTimeA: ShiftType = { ...dayShift, id: "shift-day-a", name: "サブA", countsTowardShiftTypeId: "shift-day" };
+    const partTimeB: ShiftType = { ...dayShift, id: "shift-day-b", name: "サブB", countsTowardShiftTypeId: "shift-day" };
+    const groups = buildShiftTypeGroups([dayShift, partTimeA, partTimeB]);
+
+    expect(groups).toEqual([{ members: [dayShift, partTimeA, partTimeB] }]);
   });
 });

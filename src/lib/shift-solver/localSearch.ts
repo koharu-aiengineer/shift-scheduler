@@ -5,7 +5,7 @@ import {
   isNgWeekday,
   isShiftAllowedForEmploymentType,
 } from "./constraints";
-import { addDaysToDate, enumerateDates, getIsoWeekStart } from "./dateUtils";
+import { addDaysToDate, enumerateDates, getIsoWeekday, getIsoWeekStart } from "./dateUtils";
 import { computeFairnessScoreFromAssignments } from "./fairness";
 import { createRandomGenerator, generateRandomSeed, randomInt } from "./random";
 import type {
@@ -14,6 +14,7 @@ import type {
   Employee,
   EmploymentType,
   EmploymentTypeMinStaffing,
+  EmploymentTypeWeekendMaxStaffing,
   ISODate,
   ShiftType,
   SolverInput,
@@ -29,6 +30,7 @@ type LocalSearchContext = {
   employmentTypeById: Map<string, EmploymentType>;
   shiftTypeById: Map<string, ShiftType>;
   employmentTypeMinStaffing: EmploymentTypeMinStaffing[];
+  employmentTypeWeekendMaxStaffing: EmploymentTypeWeekendMaxStaffing[];
 };
 
 // 貪欲法の初期解を、同一日内の2者間スワップによる局所探索で改善する。
@@ -52,6 +54,7 @@ export function runLocalSearch(
     employmentTypeById: new Map(input.employmentTypes.map((et) => [et.id, et])),
     shiftTypeById: new Map(input.shiftTypes.map((st) => [st.id, st])),
     employmentTypeMinStaffing: input.employmentTypeMinStaffing,
+    employmentTypeWeekendMaxStaffing: input.employmentTypeWeekendMaxStaffing ?? [],
   };
 
   const rng = createRandomGenerator(options.randomSeed ?? generateRandomSeed());
@@ -87,6 +90,7 @@ export function runLocalSearch(
       ...buildEmploymentTypeCountChanges(b, newB, context),
     ];
     if (wouldBreakEmploymentTypeMinStaffing(date, changes, assignments, context)) continue;
+    if (wouldExceedEmploymentTypeWeekendMaxStaffing(date, changes, assignments, context)) continue;
 
     const candidateAssignments = assignments.map((assignment) => {
       if (assignment === a) return { date, employeeId: a.employeeId, kind: newA.kind, shiftTypeId: newA.shiftTypeId };
@@ -300,6 +304,46 @@ function wouldBreakEmploymentTypeMinStaffing(
       context.employmentTypeMinStaffing,
     );
     if (unmet.length > 0) return true;
+  }
+
+  return false;
+}
+
+// スワップ後の勤務区分ごとの雇用形態別人数が、土日限定の上限人数
+// （employment_type_shift_staffing_requirements.max_count_weekend）を
+// 超えないかを確認する（平日は対象外）。
+function wouldExceedEmploymentTypeWeekendMaxStaffing(
+  date: ISODate,
+  changes: EmploymentTypeCountChange[],
+  assignments: Assignment[],
+  context: LocalSearchContext,
+): boolean {
+  if (getIsoWeekday(date) <= 5) return false; // 平日は対象外
+  if (context.employmentTypeWeekendMaxStaffing.length === 0) return false;
+
+  const affectedShiftTypeIds = [...new Set(changes.map((c) => c.shiftTypeId))];
+
+  for (const shiftTypeId of affectedShiftTypeIds) {
+    const counts = new Map<string, number>();
+    for (const assignment of assignments) {
+      if (assignment.date !== date || assignment.kind !== "shift" || assignment.shiftTypeId !== shiftTypeId) {
+        continue;
+      }
+      const employee = context.employeeById.get(assignment.employeeId);
+      if (!employee) continue;
+      counts.set(employee.employmentTypeId, (counts.get(employee.employmentTypeId) ?? 0) + 1);
+    }
+
+    for (const change of changes) {
+      if (change.shiftTypeId !== shiftTypeId) continue;
+      counts.set(change.employmentTypeId, (counts.get(change.employmentTypeId) ?? 0) + change.delta);
+    }
+
+    for (const requirement of context.employmentTypeWeekendMaxStaffing) {
+      if (requirement.shiftTypeId !== shiftTypeId) continue;
+      const count = counts.get(requirement.employmentTypeId) ?? 0;
+      if (count > requirement.maxCount) return true;
+    }
   }
 
   return false;

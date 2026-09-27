@@ -3,6 +3,7 @@ import {
   mapClosedDates,
   mapEmployees,
   mapEmploymentTypeMinStaffing,
+  mapEmploymentTypeWeekendMaxStaffing,
   mapEmploymentTypes,
   mapShiftTypes,
   mapStaffingRequirements,
@@ -18,12 +19,56 @@ import {
 describe("mapShiftTypes", () => {
   it("Postgresのtime型（HH:MM:SS）をHH:mmに変換する", () => {
     const rows: ShiftTypeRow[] = [
-      { id: "shift-1", name: "日勤A", start_time: "09:00:00", end_time: "17:00:00" },
+      {
+        id: "shift-1",
+        name: "日勤A",
+        start_time: "09:00:00",
+        end_time: "17:00:00",
+        counts_toward_shift_type_id: null,
+        weekday_priority: false,
+      },
     ];
 
     expect(mapShiftTypes(rows)).toEqual([
-      { id: "shift-1", name: "日勤A", startTime: "09:00", endTime: "17:00" },
+      {
+        id: "shift-1",
+        name: "日勤A",
+        startTime: "09:00",
+        endTime: "17:00",
+        countsTowardShiftTypeId: null,
+        weekdayPriority: false,
+      },
     ]);
+  });
+
+  it("counts_toward_shift_type_idをcountsTowardShiftTypeIdとしてそのまま渡す", () => {
+    const rows: ShiftTypeRow[] = [
+      {
+        id: "shift-2",
+        name: "早番パートバイト",
+        start_time: "09:00:00",
+        end_time: "13:00:00",
+        counts_toward_shift_type_id: "shift-1",
+        weekday_priority: false,
+      },
+    ];
+
+    expect(mapShiftTypes(rows)[0].countsTowardShiftTypeId).toBe("shift-1");
+  });
+
+  it("weekday_priorityをweekdayPriorityとしてそのまま渡す", () => {
+    const rows: ShiftTypeRow[] = [
+      {
+        id: "shift-2",
+        name: "早番パートバイト",
+        start_time: "09:00:00",
+        end_time: "13:00:00",
+        counts_toward_shift_type_id: "shift-1",
+        weekday_priority: true,
+      },
+    ];
+
+    expect(mapShiftTypes(rows)[0].weekdayPriority).toBe(true);
   });
 });
 
@@ -33,7 +78,12 @@ describe("mapEmploymentTypes", () => {
       id: "et-1",
       name: "正社員",
       employment_type_rules: [
-        { max_work_days_per_week: 5, max_work_hours_per_week: 40, max_consecutive_work_days: 5 },
+        {
+          max_work_days_per_week: 5,
+          max_work_hours_per_week: 40,
+          max_consecutive_work_days: 5,
+          target_monthly_hours: 165,
+        },
       ],
       employment_type_shift_restrictions: [],
       employment_type_shift_staffing_requirements: [],
@@ -45,6 +95,7 @@ describe("mapEmploymentTypes", () => {
         max_work_days_per_week: 4,
         max_work_hours_per_week: 32,
         max_consecutive_work_days: 3,
+        target_monthly_hours: null,
       },
     };
 
@@ -56,6 +107,7 @@ describe("mapEmploymentTypes", () => {
       maxWorkDaysPerWeek: 5,
       maxWorkHoursPerWeek: 40,
       maxConsecutiveWorkDays: 5,
+      targetMonthlyHours: 165,
       forbiddenShiftTypeIds: [],
     });
     expect(result[1]).toEqual({
@@ -64,6 +116,7 @@ describe("mapEmploymentTypes", () => {
       maxWorkDaysPerWeek: 4,
       maxWorkHoursPerWeek: 32,
       maxConsecutiveWorkDays: 3,
+      targetMonthlyHours: null,
       forbiddenShiftTypeIds: [],
     });
   });
@@ -81,6 +134,7 @@ describe("mapEmploymentTypes", () => {
       maxWorkDaysPerWeek: null,
       maxWorkHoursPerWeek: null,
       maxConsecutiveWorkDays: null,
+      targetMonthlyHours: null,
     });
   });
 
@@ -106,7 +160,7 @@ describe("mapEmploymentTypeMinStaffing", () => {
         employment_type_rules: null,
         employment_type_shift_restrictions: [],
         employment_type_shift_staffing_requirements: [
-          { shift_type_id: "shift-night", min_count: 1 },
+          { shift_type_id: "shift-night", min_count: 1, max_count_weekend: null },
         ],
       },
       {
@@ -120,6 +174,43 @@ describe("mapEmploymentTypeMinStaffing", () => {
 
     expect(mapEmploymentTypeMinStaffing(rows)).toEqual([
       { employmentTypeId: "et-full", shiftTypeId: "shift-night", minCount: 1 },
+    ]);
+  });
+
+  it("min_countが未設定（max_count_weekendのみ設定）の行は除外する", () => {
+    const rows: EmploymentTypeRow[] = [
+      {
+        id: "et-full",
+        name: "正社員",
+        employment_type_rules: null,
+        employment_type_shift_restrictions: [],
+        employment_type_shift_staffing_requirements: [
+          { shift_type_id: "shift-night", min_count: null, max_count_weekend: 2 },
+        ],
+      },
+    ];
+
+    expect(mapEmploymentTypeMinStaffing(rows)).toEqual([]);
+  });
+});
+
+describe("mapEmploymentTypeWeekendMaxStaffing", () => {
+  it("土日の上限人数（max_count_weekend）が設定されている行だけをフラットなリストにする", () => {
+    const rows: EmploymentTypeRow[] = [
+      {
+        id: "et-full",
+        name: "正社員",
+        employment_type_rules: null,
+        employment_type_shift_restrictions: [],
+        employment_type_shift_staffing_requirements: [
+          { shift_type_id: "shift-day", min_count: 1, max_count_weekend: 2 },
+          { shift_type_id: "shift-night", min_count: 1, max_count_weekend: null },
+        ],
+      },
+    ];
+
+    expect(mapEmploymentTypeWeekendMaxStaffing(rows)).toEqual([
+      { employmentTypeId: "et-full", shiftTypeId: "shift-day", maxCount: 2 },
     ]);
   });
 });
@@ -207,8 +298,8 @@ describe("mapClosedDates", () => {
 describe("mapStaffingRequirements", () => {
   it("デフォルト必要人数と特定日の上書きを勤務区分ごとにまとめる", () => {
     const shiftTypeRows: StaffingRequirementRow[] = [
-      { id: "shift-day", shift_staffing_requirements: [{ required_count: 2 }] },
-      { id: "shift-night", shift_staffing_requirements: { required_count: 1 } },
+      { id: "shift-day", shift_staffing_requirements: [{ required_count: 2, max_count: 3 }] },
+      { id: "shift-night", shift_staffing_requirements: { required_count: 1, max_count: null } },
     ];
     const overrideRows: StaffingOverrideRow[] = [
       { shift_type_id: "shift-day", target_date: "2026-09-20", required_count: 4 },
@@ -220,9 +311,10 @@ describe("mapStaffingRequirements", () => {
       {
         shiftTypeId: "shift-day",
         defaultRequiredCount: 2,
+        defaultMaxCount: 3,
         overrides: [{ date: "2026-09-20", requiredCount: 4 }],
       },
-      { shiftTypeId: "shift-night", defaultRequiredCount: 1, overrides: [] },
+      { shiftTypeId: "shift-night", defaultRequiredCount: 1, defaultMaxCount: null, overrides: [] },
     ]);
   });
 

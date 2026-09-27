@@ -26,6 +26,31 @@ function toMinutes(time: string): number {
   return hours * 60 + minutes;
 }
 
+// 勤務区分を「合算先（countsTowardShiftTypeId）」でグルーピングする。
+// 各グループの members[0] が親（必要人数を実際に持つ側）、それ以降が
+// 親に人数を合算されるサブ区分。合算先を持たない勤務区分は
+// メンバー1人だけのグループになる（＝従来どおり単独で扱われる）。
+export type ShiftTypeGroup = { members: ShiftType[] };
+
+export function buildShiftTypeGroups(shiftTypes: ShiftType[]): ShiftTypeGroup[] {
+  const childrenByParentId = new Map<string, ShiftType[]>();
+  const roots: ShiftType[] = [];
+
+  for (const shiftType of shiftTypes) {
+    if (shiftType.countsTowardShiftTypeId) {
+      const list = childrenByParentId.get(shiftType.countsTowardShiftTypeId) ?? [];
+      list.push(shiftType);
+      childrenByParentId.set(shiftType.countsTowardShiftTypeId, list);
+    } else {
+      roots.push(shiftType);
+    }
+  }
+
+  return roots.map((root) => ({
+    members: [root, ...(childrenByParentId.get(root.id) ?? [])],
+  }));
+}
+
 export function isShiftAllowedForEmploymentType(
   employmentType: EmploymentType,
   shiftTypeId: string,

@@ -193,6 +193,49 @@ describe("runLocalSearch: ハード制約は同点や改善であっても絶対
     }
   });
 
+  it("土日限定の雇用形態別上限人数を破るスワップ（fairnessスコアは同点）は採用しない", () => {
+    const etA: EmploymentType = { ...freeType, id: "et-a" };
+    const etB: EmploymentType = { ...freeType, id: "et-b" };
+    const employees = [
+      employee("emp-a1", { employmentTypeId: etA.id }),
+      employee("emp-a2", { employmentTypeId: etA.id }),
+      employee("emp-b1", { employmentTypeId: etB.id }),
+    ];
+    const input = baseInput({
+      periodStart: "2026-09-12", // 土曜
+      periodEnd: "2026-09-12",
+      shiftTypes: [dayShift, nightShift],
+      employees,
+      employmentTypes: [etA, etB],
+      staffingRequirements: [
+        { shiftTypeId: dayShift.id, defaultRequiredCount: 2, overrides: [] },
+        { shiftTypeId: nightShift.id, defaultRequiredCount: 1, overrides: [] },
+      ],
+      // 土日は日勤Aにet-aが最大1人まで。emp-a2とemp-b1を入れ替えると
+      // 日勤Aにet-aが2人（emp-a1・emp-a2）になり、この上限を破ってしまう。
+      employmentTypeWeekendMaxStaffing: [
+        { employmentTypeId: etA.id, shiftTypeId: dayShift.id, maxCount: 1 },
+      ],
+    });
+    const initialAssignments: Assignment[] = [
+      { date: "2026-09-12", employeeId: "emp-a1", kind: "shift", shiftTypeId: dayShift.id },
+      { date: "2026-09-12", employeeId: "emp-b1", kind: "shift", shiftTypeId: dayShift.id },
+      { date: "2026-09-12", employeeId: "emp-a2", kind: "shift", shiftTypeId: nightShift.id },
+    ];
+
+    for (const seed of [1, 2, 3, 4, 5]) {
+      const result = runLocalSearch(input, initialAssignments, { randomSeed: seed, maxIterations: 500 });
+      const countOnDayShift = result.filter(
+        (a) =>
+          a.date === "2026-09-12" &&
+          a.kind === "shift" &&
+          a.shiftTypeId === dayShift.id &&
+          employees.find((e) => e.id === a.employeeId)?.employmentTypeId === etA.id,
+      ).length;
+      expect(countOnDayShift).toBeLessThanOrEqual(1);
+    }
+  });
+
   it("雇用形態の禁止勤務区分を破るスワップは採用しない", () => {
     const dayOnly: EmploymentType = { ...freeType, id: "et-day-only", forbiddenShiftTypeIds: [nightShift.id] };
     const flexible: EmploymentType = { ...freeType, id: "et-flexible" };

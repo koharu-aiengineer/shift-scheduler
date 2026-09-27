@@ -137,6 +137,67 @@ describe("detectViolations: 構築過程に依存せず、渡されたassignment
     );
   });
 
+  it("必要人数が0の日（店舗の定休日など）は、誰も割り当たっていなくても雇用形態別必須人数の違反にしない", () => {
+    const fulltime: EmploymentType = { ...freeType, id: "et-full" };
+    const employees = [employee("emp-full", { employmentTypeId: fulltime.id })];
+    const input = baseInput({
+      employees,
+      employmentTypes: [freeType, fulltime],
+      staffingRequirements: [{ shiftTypeId: dayShift.id, defaultRequiredCount: 2, overrides: [] }],
+      employmentTypeMinStaffing: [
+        { employmentTypeId: fulltime.id, shiftTypeId: dayShift.id, minCount: 1 },
+      ],
+      closedDates: ["2026-09-07"],
+    });
+    // 定休日なので誰も出勤していない（希望休/自動割振休のみ）
+    const assignments: Assignment[] = [
+      { date: "2026-09-07", employeeId: "emp-full", kind: "system_assigned_leave", shiftTypeId: null },
+    ];
+
+    expect(detectViolations(assignments, input)).toEqual([]);
+  });
+
+  it("勤務区分に合算先が設定されていれば、親＋サブ区分の合計人数でunderstaffedを判定する", () => {
+    const subShift: ShiftType = { ...dayShift, id: "shift-day-part", name: "早番パートバイト", countsTowardShiftTypeId: dayShift.id };
+    const employees = [employee("emp-a"), employee("emp-b")];
+    const input = baseInput({
+      shiftTypes: [dayShift, subShift],
+      employees,
+      staffingRequirements: [{ shiftTypeId: dayShift.id, defaultRequiredCount: 2, overrides: [] }],
+    });
+    // 親(日勤A)に1人・サブ区分(早番パートバイト)に1人で合計2人 → 充足
+    const assignments: Assignment[] = [
+      { date: "2026-09-07", employeeId: "emp-a", kind: "shift", shiftTypeId: dayShift.id },
+      { date: "2026-09-07", employeeId: "emp-b", kind: "shift", shiftTypeId: subShift.id },
+    ];
+
+    expect(detectViolations(assignments, input)).toEqual([]);
+  });
+
+  it("合算先がある場合、親＋サブ区分の合計でも不足していればグループとして1件のunderstaffedを検出する", () => {
+    const subShift: ShiftType = { ...dayShift, id: "shift-day-part", name: "早番パートバイト", countsTowardShiftTypeId: dayShift.id };
+    const employees = [employee("emp-a")];
+    const input = baseInput({
+      shiftTypes: [dayShift, subShift],
+      employees,
+      staffingRequirements: [{ shiftTypeId: dayShift.id, defaultRequiredCount: 2, overrides: [] }],
+    });
+    const assignments: Assignment[] = [
+      { date: "2026-09-07", employeeId: "emp-a", kind: "shift", shiftTypeId: subShift.id },
+    ];
+
+    const violations = detectViolations(assignments, input);
+
+    expect(violations).toEqual([
+      expect.objectContaining({
+        severity: "hard",
+        type: "understaffed",
+        shiftTypeId: dayShift.id,
+        message: expect.stringContaining("不足1人"),
+      }),
+    ]);
+  });
+
   it("複数勤務区分・複数日にまたがっても、それぞれ独立に正しく判定する", () => {
     const employees = [employee("emp-a"), employee("emp-b")];
     const input = baseInput({

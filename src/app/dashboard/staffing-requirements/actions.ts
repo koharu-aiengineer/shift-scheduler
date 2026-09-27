@@ -12,6 +12,16 @@ function requireString(formData: FormData, field: string, label: string): string
   return value.trim();
 }
 
+function optionalNonNegativeInt(formData: FormData, field: string): number | null {
+  const value = formData.get(field);
+  if (typeof value !== "string" || value.trim().length === 0) return null;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error("上限人数は0以上の整数で入力してください");
+  }
+  return parsed;
+}
+
 async function requireOwnedShiftTypeId(
   supabase: Awaited<ReturnType<typeof createClient>>,
   storeId: string,
@@ -37,6 +47,10 @@ export async function saveDefaultRequirement(formData: FormData) {
   if (!Number.isFinite(requiredCount) || requiredCount < 0) {
     throw new Error("必要人数は0以上の整数で入力してください");
   }
+  const maxCount = optionalNonNegativeInt(formData, "max_count");
+  if (maxCount !== null && maxCount < requiredCount) {
+    throw new Error("上限人数は必要人数以上で入力してください");
+  }
 
   const supabase = await createClient();
   await requireOwnedShiftTypeId(supabase, store.id, shiftTypeId);
@@ -44,7 +58,7 @@ export async function saveDefaultRequirement(formData: FormData) {
   const { error } = await supabase
     .from("shift_staffing_requirements")
     .upsert(
-      { shift_type_id: shiftTypeId, required_count: requiredCount },
+      { shift_type_id: shiftTypeId, required_count: requiredCount, max_count: maxCount },
       { onConflict: "shift_type_id" },
     );
 

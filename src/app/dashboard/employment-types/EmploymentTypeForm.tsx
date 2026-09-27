@@ -12,8 +12,10 @@ export type EmploymentTypeInitialValues = {
   maxWorkDaysPerWeek?: number | null;
   maxWorkHoursPerWeek?: number | null;
   maxConsecutiveWorkDays?: number | null;
+  targetMonthlyHours?: number | null;
   restrictedShiftTypeIds?: string[];
   requirements?: Record<string, number>;
+  weekendMaxRequirements?: Record<string, number>;
 };
 
 export function EmploymentTypeForm({
@@ -31,6 +33,7 @@ export function EmploymentTypeForm({
 }) {
   const restricted = new Set(initial?.restrictedShiftTypeIds ?? []);
   const requirements = initial?.requirements ?? {};
+  const weekendMaxRequirements = initial?.weekendMaxRequirements ?? {};
 
   return (
     <form action={action} className="flex max-w-lg flex-col gap-4">
@@ -47,7 +50,7 @@ export function EmploymentTypeForm({
         />
       </label>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-4 gap-3">
         <label className="flex flex-col gap-1 text-sm">
           週の最大勤務日数
           <input
@@ -83,6 +86,18 @@ export function EmploymentTypeForm({
             placeholder="未設定"
           />
         </label>
+        <label className="flex flex-col gap-1 text-sm">
+          月間目標時間（任意）
+          <input
+            type="number"
+            name="target_monthly_hours"
+            min={0}
+            step={0.5}
+            defaultValue={initial?.targetMonthlyHours ?? undefined}
+            className="rounded border px-3 py-2"
+            placeholder="未設定"
+          />
+        </label>
       </div>
 
       <div className="flex flex-col gap-2">
@@ -98,6 +113,7 @@ export function EmploymentTypeForm({
                 <th className="py-1 font-normal">勤務区分</th>
                 <th className="py-1 font-normal">入れない</th>
                 <th className="py-1 font-normal">必須配置人数</th>
+                <th className="py-1 font-normal">土日の上限人数</th>
               </tr>
             </thead>
             <tbody>
@@ -125,6 +141,16 @@ export function EmploymentTypeForm({
                       name={`min_${shiftType.id}`}
                       min={1}
                       defaultValue={requirements[shiftType.id] ?? undefined}
+                      className="w-20 rounded border px-2 py-1"
+                      placeholder="未設定"
+                    />
+                  </td>
+                  <td className="py-2">
+                    <input
+                      type="number"
+                      name={`weekend_max_${shiftType.id}`}
+                      min={0}
+                      defaultValue={weekendMaxRequirements[shiftType.id] ?? undefined}
                       className="w-20 rounded border px-2 py-1"
                       placeholder="未設定"
                     />

@@ -23,7 +23,7 @@ export default async function EmploymentTypesPage() {
   const { data: employmentTypes, error: employmentTypesError } = await supabase
     .from("employment_types")
     .select(
-      "id, name, employment_type_rules(max_work_days_per_week, max_work_hours_per_week, max_consecutive_work_days), employment_type_shift_restrictions(shift_type_id), employment_type_shift_staffing_requirements(shift_type_id, min_count)",
+      "id, name, employment_type_rules(max_work_days_per_week, max_work_hours_per_week, max_consecutive_work_days, target_monthly_hours), employment_type_shift_restrictions(shift_type_id), employment_type_shift_staffing_requirements(shift_type_id, min_count, max_count_weekend)",
     )
     .eq("store_id", store.id)
     .order("name", { ascending: true });
@@ -43,8 +43,14 @@ export default async function EmploymentTypesPage() {
     );
 
     const requirements: Record<string, number> = {};
+    const weekendMaxRequirements: Record<string, number> = {};
     for (const req of et.employment_type_shift_staffing_requirements ?? []) {
-      requirements[req.shift_type_id as string] = req.min_count as number;
+      if (req.min_count != null) {
+        requirements[req.shift_type_id as string] = req.min_count as number;
+      }
+      if (req.max_count_weekend != null) {
+        weekendMaxRequirements[req.shift_type_id as string] = req.max_count_weekend as number;
+      }
     }
 
     const listItem: EmploymentTypeListItem = {
@@ -53,12 +59,17 @@ export default async function EmploymentTypesPage() {
       maxWorkDaysPerWeek: rule?.max_work_days_per_week ?? null,
       maxWorkHoursPerWeek: rule?.max_work_hours_per_week ?? null,
       maxConsecutiveWorkDays: rule?.max_consecutive_work_days ?? null,
+      targetMonthlyHours: rule?.target_monthly_hours ?? null,
       restrictedShiftTypeNames: restrictedShiftTypeIds
         .map((id) => shiftTypeNameById.get(id))
         .filter((name): name is string => Boolean(name)),
       requirementSummaries: Object.entries(requirements).map(
         ([shiftTypeId, minCount]) =>
           `${shiftTypeNameById.get(shiftTypeId) ?? "?"} ${minCount}人以上`,
+      ),
+      weekendMaxSummaries: Object.entries(weekendMaxRequirements).map(
+        ([shiftTypeId, maxCount]) =>
+          `${shiftTypeNameById.get(shiftTypeId) ?? "?"} ${maxCount}人まで`,
       ),
     };
 
@@ -70,8 +81,10 @@ export default async function EmploymentTypesPage() {
         maxWorkDaysPerWeek: rule?.max_work_days_per_week ?? null,
         maxWorkHoursPerWeek: rule?.max_work_hours_per_week ?? null,
         maxConsecutiveWorkDays: rule?.max_consecutive_work_days ?? null,
+        targetMonthlyHours: rule?.target_monthly_hours ?? null,
         restrictedShiftTypeIds,
         requirements,
+        weekendMaxRequirements,
       },
     };
   });

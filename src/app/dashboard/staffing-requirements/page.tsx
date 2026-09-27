@@ -11,16 +11,27 @@ export default async function StaffingRequirementsPage() {
 
   const supabase = await createClient();
 
-  const { data: shiftTypes, error: shiftTypesError } = await supabase
+  const { data: allShiftTypes, error: shiftTypesError } = await supabase
     .from("shift_types")
     .select(
-      "id, name, color, shift_staffing_requirements(required_count)",
+      "id, name, color, counts_toward_shift_type_id, shift_staffing_requirements(required_count, max_count)",
     )
     .eq("store_id", store.id)
     .order("start_time", { ascending: true });
   if (shiftTypesError) throw new Error(shiftTypesError.message);
 
-  const shiftTypeIds = (shiftTypes ?? []).map((st) => st.id);
+  // 合算先が設定されている勤務区分（サブ区分）は自分の必要人数を持たないため、
+  // この画面には表示しない。その人数は合算先（親）の必要人数の一部として扱われる。
+  const shiftTypes = (allShiftTypes ?? []).filter((st) => !st.counts_toward_shift_type_id);
+  const childNamesByParentId = new Map<string, string[]>();
+  for (const st of allShiftTypes ?? []) {
+    if (!st.counts_toward_shift_type_id) continue;
+    const list = childNamesByParentId.get(st.counts_toward_shift_type_id) ?? [];
+    list.push(st.name);
+    childNamesByParentId.set(st.counts_toward_shift_type_id, list);
+  }
+
+  const shiftTypeIds = shiftTypes.map((st) => st.id);
   const { data: overrides, error: overridesError } = shiftTypeIds.length
     ? await supabase
         .from("shift_staffing_overrides")
@@ -30,9 +41,7 @@ export default async function StaffingRequirementsPage() {
     : { data: [], error: null };
   if (overridesError) throw new Error(overridesError.message);
 
-  const shiftTypeNameById = new Map(
-    (shiftTypes ?? []).map((st) => [st.id as string, st.name as string]),
-  );
+  const shiftTypeNameById = new Map(shiftTypes.map((st) => [st.id, st.name]));
 
   return (
     <main className="flex flex-col gap-8">
@@ -48,6 +57,7 @@ export default async function StaffingRequirementsPage() {
               <tr className="border-b text-left text-gray-500">
                 <th className="py-2 font-normal">勤務区分</th>
                 <th className="py-2 font-normal">必要人数</th>
+                <th className="py-2 font-normal">上限人数（任意）</th>
                 <th className="py-2 font-normal"></th>
               </tr>
             </thead>
@@ -58,6 +68,7 @@ export default async function StaffingRequirementsPage() {
                 )
                   ? shiftType.shift_staffing_requirements[0]
                   : shiftType.shift_staffing_requirements;
+                const childNames = childNamesByParentId.get(shiftType.id) ?? [];
                 return (
                   <tr key={shiftType.id} className="border-b">
                     <td className="py-2">
@@ -68,8 +79,13 @@ export default async function StaffingRequirementsPage() {
                         />
                         {shiftType.name}
                       </span>
+                      {childNames.length > 0 && (
+                        <p className="mt-1 text-xs text-gray-500">
+                          {childNames.join("・")}を含む合計人数です
+                        </p>
+                      )}
                     </td>
-                    <td className="py-2">
+                    <td colSpan={3} className="py-2">
                       <form action={saveDefaultRequirement} className="flex items-center gap-2">
                         <input type="hidden" name="shift_type_id" value={shiftType.id} />
                         <input
@@ -78,6 +94,14 @@ export default async function StaffingRequirementsPage() {
                           min={0}
                           defaultValue={requirement?.required_count ?? 0}
                           className="w-20 rounded border px-2 py-1"
+                        />
+                        <input
+                          type="number"
+                          name="max_count"
+                          min={0}
+                          placeholder="上限なし"
+                          defaultValue={requirement?.max_count ?? ""}
+                          className="w-24 rounded border px-2 py-1"
                         />
                         <button
                           type="submit"
