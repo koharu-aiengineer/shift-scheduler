@@ -612,7 +612,7 @@ describe("buildGreedySolution: 勤務区分の合算先（グループ必要人�
 });
 
 describe("buildGreedySolution: 上限人数（任意）による余裕があるときの追加割当て", () => {
-  it("上限人数が設定されていて候補者に余裕があれば、必要人数を超えて上限まで割り当てる", () => {
+  it("目標時間未達の候補者がいなければ、上限人数が設定されていても必要人数+1人までしか割り当てない", () => {
     const employees = [employee("emp-a"), employee("emp-b"), employee("emp-c")];
     const input = baseInput({
       employees,
@@ -623,8 +623,92 @@ describe("buildGreedySolution: 上限人数（任意）による余裕がある�
 
     const { assignments, violations } = buildGreedySolution(input);
 
+    // 必要人数(1)+普段のバッファ(1) = 2人まで（上限3人には無条件では届かない）
+    expect(assignments.filter((a) => a.kind === "shift")).toHaveLength(2);
+    expect(violations).toHaveLength(0);
+  });
+
+  it("月間目標時間が未達の候補者が、上限（headroom）ぴったりの人数だけその日いれば、その全員を上限まで割り当てる", () => {
+    const targetType: EmploymentType = {
+      ...freeType,
+      id: "et-target",
+      targetMonthlyHours: 100, // 大きめの目標にして、期間中ずっと未達のままにする
+    };
+    const employees = [
+      employee("emp-a", { employmentTypeId: targetType.id }),
+      employee("emp-b", { employmentTypeId: targetType.id }),
+      employee("emp-c", { employmentTypeId: targetType.id }),
+      employee("emp-d"), // 目標時間の設定が無い雇用形態
+    ];
+    const input = baseInput({
+      employees,
+      employmentTypes: [freeType, targetType],
+      staffingRequirements: [
+        { shiftTypeId: dayShift.id, defaultRequiredCount: 1, defaultMaxCount: 3, overrides: [] },
+      ],
+    });
+
+    const { assignments, violations } = buildGreedySolution(input);
+
+    // 目標未達候補者3人（＝上限3人ちょうど）を割り当てる
     expect(assignments.filter((a) => a.kind === "shift")).toHaveLength(3);
     expect(violations).toHaveLength(0);
+  });
+
+  it("目標未達の候補者が上限までの余地より多くても、上限は超えない", () => {
+    const targetType: EmploymentType = {
+      ...freeType,
+      id: "et-target",
+      targetMonthlyHours: 100,
+    };
+    const employees = [
+      employee("emp-a", { employmentTypeId: targetType.id }),
+      employee("emp-b", { employmentTypeId: targetType.id }),
+      employee("emp-c", { employmentTypeId: targetType.id }),
+      employee("emp-d", { employmentTypeId: targetType.id }),
+    ];
+    const input = baseInput({
+      employees,
+      employmentTypes: [freeType, targetType],
+      staffingRequirements: [
+        { shiftTypeId: dayShift.id, defaultRequiredCount: 1, defaultMaxCount: 3, overrides: [] },
+      ],
+    });
+
+    const { assignments } = buildGreedySolution(input);
+
+    expect(assignments.filter((a) => a.kind === "shift")).toHaveLength(3);
+  });
+
+  it("目標未達の候補者が上限（headroom）より少ない場合、その人数までしか埋めず、目標達成済みの候補者で埋め増さない", () => {
+    const targetType: EmploymentType = {
+      ...freeType,
+      id: "et-target",
+      targetMonthlyHours: 100,
+    };
+    const employees = [
+      employee("emp-a", { employmentTypeId: targetType.id }),
+      employee("emp-b", { employmentTypeId: targetType.id }),
+      employee("emp-c"), // 目標時間の設定が無い雇用形態（本来ならStep2bで埋め増しに使われ得る候補）
+    ];
+    const input = baseInput({
+      employees,
+      employmentTypes: [freeType, targetType],
+      staffingRequirements: [
+        { shiftTypeId: dayShift.id, defaultRequiredCount: 1, defaultMaxCount: 3, overrides: [] },
+      ],
+    });
+
+    const { assignments } = buildGreedySolution(input);
+
+    const assignedEmployeeIds = assignments
+      .filter((a) => a.kind === "shift")
+      .map((a) => a.employeeId)
+      .sort();
+    // 目標未達の2人（emp-a, emp-b）だけが割り当てられ、上限（3人）までは
+    // 埋めない。他のグループでも使われるかもしれない目標未達候補者を
+    // 事前見積もりだけで先取りして埋め増さない、という意図の確認も兼ねる。
+    expect(assignedEmployeeIds).toEqual(["emp-a", "emp-b"]);
   });
 
   it("上限人数が設定されていても、候補者が足りなければ無理に増やさず必要人数の充足だけを見る", () => {

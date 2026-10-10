@@ -16,6 +16,7 @@ export function detectViolations(assignments: Assignment[], input: SolverInput):
   const violations: ConstraintViolation[] = [];
 
   const employeeById = new Map(input.employees.map((employee) => [employee.id, employee]));
+  const employmentTypeById = new Map(input.employmentTypes.map((employmentType) => [employmentType.id, employmentType]));
   const dates = enumerateDates(input.periodStart, input.periodEnd);
   const resolved = resolveRequirements(
     input.periodStart,
@@ -120,13 +121,22 @@ export function detectViolations(assignments: Assignment[], input: SolverInput):
       const unmet = findUnmetEmploymentTypeMinStaffing(shiftType.id, countsByEmploymentType, input.employmentTypeMinStaffing);
       for (const requirement of unmet) {
         const have = countsByEmploymentType.get(requirement.employmentTypeId) ?? 0;
+        const employmentTypeName = employmentTypeById.get(requirement.employmentTypeId)?.name ?? "対象の雇用形態";
+        // その勤務区分自体の頭数（必要人数）が足りているかどうかとは別に、
+        // 「特定の雇用形態が最低○人入っているか」という制約であることが伝わる
+        // ように、雇用形態名を明示した文言にする（全体の頭数は満たしていても
+        // 発生しうるため、「不足」だけだと頭数不足と誤解されやすい）。
+        const message =
+          have === 0
+            ? `${date}の${shiftType.name}に${employmentTypeName}が1人も入っていません（最低${requirement.minCount}人必要）。`
+            : `${date}の${shiftType.name}の${employmentTypeName}が${have}人しかいません（最低${requirement.minCount}人必要、あと${requirement.minCount - have}人不足）。`;
         violations.push({
           severity: "hard",
           type: "employment_type_min_understaffed",
           date,
           employeeId: null,
           shiftTypeId: shiftType.id,
-          message: `${date}の${shiftType.name}で雇用形態別必須人数（${requirement.minCount}人）を満たせませんでした（不足${requirement.minCount - have}人）。`,
+          message,
         });
       }
     }

@@ -137,6 +137,57 @@ describe("detectViolations: 構築過程に依存せず、渡されたassignment
     );
   });
 
+  it("雇用形態別必須人数の違反メッセージは、頭数不足ではなく特定の雇用形態が入っていないことだと分かる文言にする", () => {
+    const staff: EmploymentType = { ...freeType, id: "et-staff", name: "社員" };
+    // 頭数（必要人数）自体は満たすが、社員が1人も入らない構成
+    const employees = [employee("emp-part-a"), employee("emp-part-b")];
+    const input = baseInput({
+      employees,
+      employmentTypes: [freeType, staff],
+      staffingRequirements: [{ shiftTypeId: dayShift.id, defaultRequiredCount: 2, overrides: [] }],
+      employmentTypeMinStaffing: [{ employmentTypeId: staff.id, shiftTypeId: dayShift.id, minCount: 1 }],
+    });
+    const assignments: Assignment[] = [
+      { date: "2026-09-07", employeeId: "emp-part-a", kind: "shift", shiftTypeId: dayShift.id },
+      { date: "2026-09-07", employeeId: "emp-part-b", kind: "shift", shiftTypeId: dayShift.id },
+    ];
+
+    const violations = detectViolations(assignments, input);
+
+    // 必要人数（頭数）の違反は出ない（2人で足りている）が、社員が0人なので
+    // 雇用形態別必須人数の違反だけが出る
+    expect(violations.some((v) => v.type === "understaffed")).toBe(false);
+    expect(violations).toEqual([
+      expect.objectContaining({
+        type: "employment_type_min_understaffed",
+        message: "2026-09-07の日勤Aに社員が1人も入っていません（最低1人必要）。",
+      }),
+    ]);
+  });
+
+  it("雇用形態別必須人数を一部だけ満たしている場合は、不足人数を添えた文言にする", () => {
+    const staff: EmploymentType = { ...freeType, id: "et-staff", name: "社員" };
+    const employees = [employee("emp-staff-a", { employmentTypeId: staff.id })];
+    const input = baseInput({
+      employees,
+      employmentTypes: [freeType, staff],
+      staffingRequirements: [{ shiftTypeId: dayShift.id, defaultRequiredCount: 1, overrides: [] }],
+      employmentTypeMinStaffing: [{ employmentTypeId: staff.id, shiftTypeId: dayShift.id, minCount: 2 }],
+    });
+    const assignments: Assignment[] = [
+      { date: "2026-09-07", employeeId: "emp-staff-a", kind: "shift", shiftTypeId: dayShift.id },
+    ];
+
+    const violations = detectViolations(assignments, input);
+
+    expect(violations).toEqual([
+      expect.objectContaining({
+        type: "employment_type_min_understaffed",
+        message: "2026-09-07の日勤Aの社員が1人しかいません（最低2人必要、あと1人不足）。",
+      }),
+    ]);
+  });
+
   it("必要人数が0の日（店舗の定休日など）は、誰も割り当たっていなくても雇用形態別必須人数の違反にしない", () => {
     const fulltime: EmploymentType = { ...freeType, id: "et-full" };
     const employees = [employee("emp-full", { employmentTypeId: fulltime.id })];

@@ -62,7 +62,12 @@ export function runLocalSearch(
     options.maxIterations ?? defaultMaxIterations(input.employees.length, dates.length);
 
   let assignments = initialAssignments.map((a) => ({ ...a }));
-  let currentScore = computeFairnessScoreFromAssignments(assignments, input.employees);
+  let currentScore = computeFairnessScoreFromAssignments(
+    assignments,
+    input.employees,
+    context.employmentTypeById,
+    context.shiftTypeById,
+  );
 
   for (let iteration = 0; iteration < maxIterations; iteration++) {
     const date = dates[randomInt(rng, dates.length)];
@@ -98,7 +103,12 @@ export function runLocalSearch(
       return assignment;
     });
 
-    const candidateScore = computeFairnessScoreFromAssignments(candidateAssignments, input.employees);
+    const candidateScore = computeFairnessScoreFromAssignments(
+      candidateAssignments,
+      input.employees,
+      context.employmentTypeById,
+      context.shiftTypeById,
+    );
     const delta = candidateScore - currentScore;
     const temperature = Math.max(1 - iteration / maxIterations, 0.01);
     const accept = delta <= 0 || rng() < Math.exp(-delta / temperature);

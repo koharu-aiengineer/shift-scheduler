@@ -224,7 +224,7 @@ export function buildGreedySolution(input: SolverInput): GreedyResult {
           .reduce((sum, r) => sum + r.minCount, 0);
         // 週の需給が厳しい週だけ、今日の目標人数を按分縮小する（雇用形態別
         // 必須人数の下限は必ず下回らないようにする）。通常週はfillRatio=1のため
-        // targetCount === requiredCountで、既存の挙動と変わらない。
+        // baseTargetCount === requiredCountで、既存の挙動と変わらない。
         // 端数はMath.floorで切り捨てる: Σfloor(requiredCount_i × fillRatio) は
         // 常に週の供給量以下になることが数学的に保証される（Σ(x_i×r) = r×Σx_i =
         // 供給量になるため）。Math.roundやMath.ceilだと週の目標合計が供給量を
@@ -237,14 +237,36 @@ export function buildGreedySolution(input: SolverInput): GreedyResult {
         // 按分は「Σfloor(requiredCount_i×fillRatio) ≤ 週の供給量」という
         // 数学的保証の上に成り立っており、ここで上限まで積み増すとその保証が
         // 崩れ、按分導入前に戻っていた「週後半が0人になる」問題が再発しうるため。
+        //
+        // 上限までの積み増しは2段構えの上限（ceiling）で表す（無条件に「上限まで」
+        // とはしない。そうしないと、月間目標時間の設定が無いパート・アルバイトまで
+        // 際限なく埋め増され、他の日の休みが削られてしまうため）:
+        //   - stretchCeiling: 月間目標時間がまだ未達の候補者（例: 社員）専用の
+        //     枠。Step2a（下のfor文）だけがこの上限まで使ってよく、below-target
+        //     候補者が尽きれば自然に止まる（他グループとの取り合いで実際に
+        //     使える人数が事前の見積もりより少なくても、isEligibleをその場で
+        //     再評価するので正しく反映される）
+        //   - normalCeiling: 目標未達の候補者がいなくても許容する「普段」の
+        //     上限（必要人数+1）。Step2b（below-target以外の全員が対象）は
+        //     ここまでしか埋めない。Step2aで既にnormalCeilingを超えていれば
+        //     Step2bは何もしない（below-targetで積み増した分を、後から誰でも
+        //     良い枠でさらに上乗せしてしまわないようにするため）。
         const maxCount = maxCountByShiftTypeId.get(rootId) ?? null;
-        const targetCount =
-          maxCount != null && fillRatio === 1 ? Math.max(baseTargetCount, maxCount) : baseTargetCount;
+        const stretchCeiling = maxCount != null && fillRatio === 1 ? maxCount : baseTargetCount;
+        const normalCeiling =
+          maxCount != null && fillRatio === 1 ? Math.min(maxCount, baseTargetCount + 1) : baseTargetCount;
         const eligibleCount = group.members.reduce(
           (sum, member) => sum + input.employees.filter((e) => isEligible(e, member.id)).length,
           0,
         );
-        return { group, requiredCount, targetCount, baseTargetCount, slack: eligibleCount - targetCount };
+        return {
+          group,
+          requiredCount,
+          baseTargetCount,
+          stretchCeiling,
+          normalCeiling,
+          slack: eligibleCount - normalCeiling,
+        };
       })
       .filter((entry) => entry.requiredCount > 0)
       .sort((a, b) => a.slack - b.slack);
@@ -263,7 +285,7 @@ export function buildGreedySolution(input: SolverInput): GreedyResult {
     // （＝ソフトな優先度づけがハードな必須人数要件を壊してしまう）ため、
     // 全グループのStep1を1パス目として独立に済ませてから、Step2以降に進む。
     const assignedCountAfterStep1ByGroup = new Map<string, number>();
-    for (const { group, targetCount } of groupPlanForToday) {
+    for (const { group, stretchCeiling } of groupPlanForToday) {
       const memberIds = group.members.map((m) => m.id);
       const minStaffingForGroup = input.employmentTypeMinStaffing.filter((r) =>
         memberIds.includes(r.shiftTypeId),
@@ -280,7 +302,7 @@ export function buildGreedySolution(input: SolverInput): GreedyResult {
         const pool = input.employees.filter((e) => e.employmentTypeId === requirement.employmentTypeId);
         const ordered = orderCandidates(pool, requirement.shiftTypeId);
         for (const candidate of ordered) {
-          if (shortfall <= 0 || assignedCount >= targetCount) break;
+          if (shortfall <= 0 || assignedCount >= stretchCeiling) break;
           // orderCandidatesはこのループ開始時点のスナップショットのため、
           // 土日限定の上限人数のような「今まさに割り当てた分だけ消費される」
           // 制約は、実際に割り当てる直前に再チェックする必要がある。
@@ -309,7 +331,7 @@ export function buildGreedySolution(input: SolverInput): GreedyResult {
       assignedCountAfterStep1ByGroup.set(group.members[0].id, assignedCount);
     }
 
-    for (const { group, requiredCount, targetCount, baseTargetCount } of groupPlanForToday) {
+    for (const { group, requiredCount, baseTargetCount, stretchCeiling, normalCeiling } of groupPlanForToday) {
       let assignedCount = assignedCountAfterStep1ByGroup.get(group.members[0].id) ?? 0;
 
       // Step2a: 月間目標時間にまだ届いていない候補者（例: 目標時間を設定した
@@ -318,12 +340,15 @@ export function buildGreedySolution(input: SolverInput): GreedyResult {
       // 先に埋まってしまうと、サブ区分に入れない雇用形態の従業員（例: 社員は
       // パートバイト区分に入れない）が目標時間に届きにくくなるため、
       // 目標未達の人がいる限りは常に親を優先する。
-      if (assignedCount < targetCount) {
+      // stretchCeilingまで使ってよいのはこのStep2aだけ（below-target候補者
+      // のみが対象なので、他グループとの取り合いで実際に確保できる人数が
+      // 少なくても、below-target候補者が尽きた時点で自然に止まる）。
+      if (assignedCount < stretchCeiling) {
         for (const member of group.members) {
-          if (assignedCount >= targetCount) break;
+          if (assignedCount >= stretchCeiling) break;
           const priorityOrdered = orderCandidates(input.employees, member.id).filter(isBelowTarget);
           for (const candidate of priorityOrdered) {
-            if (assignedCount >= targetCount) break;
+            if (assignedCount >= stretchCeiling) break;
             if (!isEligible(candidate, member.id)) continue;
             assign(candidate, member.id);
             assignedCount += 1;
@@ -336,17 +361,21 @@ export function buildGreedySolution(input: SolverInput): GreedyResult {
       // 埋めるが、weekdayPriority: trueのメンバーがいれば、平日（月〜金）に限り
       // そのメンバーを先に試す（強制ではなく、埋まらない分はそのまま他メンバーへ
       // 回る）。土日はこの並べ替えを行わない。
+      // normalCeilingまでしか埋めない（below-target候補者以外にまで上限人数
+      // 分の積み増しを許すと、パート・アルバイトが際限なく埋め増されてしまう
+      // ため）。Step2aで既にnormalCeilingを超えていれば、下のif自体が
+      // falseになるので何もしない。
       const fillOrder = isWeekday
         ? [...group.members].sort(
             (a, b) => Number(b.weekdayPriority ?? false) - Number(a.weekdayPriority ?? false),
           )
         : group.members;
-      if (assignedCount < targetCount) {
+      if (assignedCount < normalCeiling) {
         for (const member of fillOrder) {
-          if (assignedCount >= targetCount) break;
+          if (assignedCount >= normalCeiling) break;
           const ordered = orderCandidates(input.employees, member.id);
           for (const candidate of ordered) {
-            if (assignedCount >= targetCount) break;
+            if (assignedCount >= normalCeiling) break;
             if (!isEligible(candidate, member.id)) continue;
             assign(candidate, member.id);
             assignedCount += 1;

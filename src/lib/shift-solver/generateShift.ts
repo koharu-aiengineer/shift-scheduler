@@ -22,7 +22,15 @@ export function generateShift(input: SolverInput, options: GenerateShiftOptions 
   });
 
   const violations = detectViolations(assignments, input);
-  const fairnessScore = computeFairnessScore(assignments, input.employees, violations);
+  const employmentTypeById = new Map(input.employmentTypes.map((et) => [et.id, et]));
+  const shiftTypeById = new Map(input.shiftTypes.map((st) => [st.id, st]));
+  const fairnessScore = computeFairnessScore(
+    assignments,
+    input.employees,
+    violations,
+    employmentTypeById,
+    shiftTypeById,
+  );
 
   return { assignments, violations, fairnessScore };
 }
