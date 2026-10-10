@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildAttendanceCountFormatRequests,
   buildClearFormatRequest,
   buildConditionalFormatRequests,
   buildDataValidationRequest,
   buildDeleteConditionalFormatRequests,
+  buildFreezePaneRequest,
 } from "../buildSheetEditingRequests";
 import { hexToRgb, type CellLegendEntry } from "../colors";
 import type { SheetMatrix } from "../buildSheetMatrix";
@@ -43,15 +45,64 @@ describe("hexToRgb", () => {
 });
 
 describe("buildClearFormatRequest", () => {
-  it("targets the given sheet with a generous, fixed-size range", () => {
+  it("targets the given sheet with a generous, fixed-size range, resetting background, bold, and borders", () => {
     const request = buildClearFormatRequest(7);
 
     expect(request).toMatchObject({
       repeatCell: {
         range: { sheetId: 7, startRowIndex: 0, startColumnIndex: 0 },
-        fields: "userEnteredFormat.backgroundColor",
+        cell: {
+          userEnteredFormat: {
+            backgroundColor: { red: 1, green: 1, blue: 1 },
+            textFormat: { bold: false },
+            borders: {
+              top: { style: "NONE" },
+              bottom: { style: "NONE" },
+              left: { style: "NONE" },
+              right: { style: "NONE" },
+            },
+          },
+        },
+        fields: "userEnteredFormat(backgroundColor,textFormat,borders)",
       },
     });
+  });
+});
+
+describe("buildFreezePaneRequest", () => {
+  it("freezes only the employee name column (column A), so it stays visible when scrolling through date columns", () => {
+    expect(buildFreezePaneRequest(42)).toEqual({
+      updateSheetProperties: {
+        properties: { sheetId: 42, gridProperties: { frozenColumnCount: 1 } },
+        fields: "gridProperties.frozenColumnCount",
+      },
+    });
+  });
+});
+
+describe("buildAttendanceCountFormatRequests", () => {
+  it("bolds the attendance-count rows and draws a thick top border separating them from the employee rows", () => {
+    const requests = buildAttendanceCountFormatRequests(42, 5, 2, 8);
+
+    expect(requests).toEqual([
+      {
+        repeatCell: {
+          range: { sheetId: 42, startRowIndex: 5, endRowIndex: 7, startColumnIndex: 0, endColumnIndex: 8 },
+          cell: { userEnteredFormat: { textFormat: { bold: true } } },
+          fields: "userEnteredFormat.textFormat",
+        },
+      },
+      {
+        updateBorders: {
+          range: { sheetId: 42, startRowIndex: 5, endRowIndex: 6, startColumnIndex: 0, endColumnIndex: 8 },
+          top: { style: "SOLID_THICK", color: { red: 0, green: 0, blue: 0 } },
+        },
+      },
+    ]);
+  });
+
+  it("returns no requests when there are no attendance-count rows", () => {
+    expect(buildAttendanceCountFormatRequests(42, 5, 0, 8)).toEqual([]);
   });
 });
 

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { computeEmployeeShiftSummary } from "../computeEmployeeShiftSummary";
+import {
+  computeEmployeeShiftSummary,
+  computeEmployeeShiftSummaryFromSheetRows,
+} from "../computeEmployeeShiftSummary";
 import type { Assignment } from "../../shift-solver/types";
 
 const employees = [
@@ -76,5 +79,76 @@ describe("computeEmployeeShiftSummary", () => {
 
     expect(result[0].shiftCounts.every((c) => c.count === 0)).toBe(true);
     expect(result[0].leaveDaysCount).toBe(0);
+  });
+});
+
+describe("computeEmployeeShiftSummaryFromSheetRows", () => {
+  it("counts cells that match a shift type name as shifts", () => {
+    const result = computeEmployeeShiftSummaryFromSheetRows({
+      employees,
+      shiftTypes,
+      sheetRows: [
+        { employeeName: "田中", cellTexts: ["早番", "早番", "遅番", "休"] },
+        { employeeName: "佐藤", cellTexts: ["遅番", "公休", "定休日", "休"] },
+      ],
+      dayCount: 4,
+    });
+
+    expect(result[0]).toMatchObject({
+      employeeId: "emp-1",
+      shiftCounts: [
+        { shiftTypeId: "shift-early", count: 2 },
+        { shiftTypeId: "shift-late", count: 1 },
+      ],
+      leaveDaysCount: 1,
+    });
+    expect(result[1]).toMatchObject({
+      employeeId: "emp-2",
+      shiftCounts: [
+        { shiftTypeId: "shift-early", count: 0 },
+        { shiftTypeId: "shift-late", count: 1 },
+      ],
+      leaveDaysCount: 3,
+    });
+  });
+
+  it("treats any text that isn't a shift type name as a leave day (休・公休・定休日・誤字など)", () => {
+    const result = computeEmployeeShiftSummaryFromSheetRows({
+      employees,
+      shiftTypes,
+      sheetRows: [{ employeeName: "田中", cellTexts: ["早番", "??", "たいきん"] }],
+      dayCount: 3,
+    });
+
+    expect(result[0].shiftCounts).toEqual([
+      { shiftTypeId: "shift-early", shiftTypeName: "早番", count: 1 },
+      { shiftTypeId: "shift-late", shiftTypeName: "遅番", count: 0 },
+    ]);
+    expect(result[0].leaveDaysCount).toBe(2);
+  });
+
+  it("pads missing trailing cells (Sheets API omits trailing blanks) as leave days", () => {
+    const result = computeEmployeeShiftSummaryFromSheetRows({
+      employees,
+      shiftTypes,
+      sheetRows: [{ employeeName: "田中", cellTexts: ["早番"] }], // 実際は4日分あるはずだが3日分が空欄で省略された想定
+      dayCount: 4,
+    });
+
+    expect(result[0].shiftCounts[0].count).toBe(1);
+    expect(result[0].leaveDaysCount).toBe(3);
+  });
+
+  it("zero-fills an employee with no matching row in the sheet (all days counted as leave)", () => {
+    const result = computeEmployeeShiftSummaryFromSheetRows({
+      employees,
+      shiftTypes,
+      sheetRows: [{ employeeName: "佐藤", cellTexts: ["早番", "早番"] }],
+      dayCount: 2,
+    });
+
+    expect(result[0].employeeId).toBe("emp-1");
+    expect(result[0].shiftCounts.every((c) => c.count === 0)).toBe(true);
+    expect(result[0].leaveDaysCount).toBe(2);
   });
 });

@@ -9,10 +9,13 @@ const CLEAR_FORMAT_ROW_COUNT = 1000;
 const CLEAR_FORMAT_COLUMN_COUNT = 60;
 
 // 既存タブを再利用する（＝上書き再生成する）ときに、前回書き込み時の
-// 背景色が新しい表の外側に残らないよう、十分広い範囲の背景色を先にクリアする。
-// 通常の出勤セルの色分けは条件付き書式（buildConditionalFormatRequests）が
-// 担うため、ここでクリアするのは「ルールに一致しない自由入力セル」に前回の
-// 色が残らないようにするための保険。
+// 背景色・太字・罫線が新しい表の外側に残らないよう、十分広い範囲を先に
+// クリアする。通常の出勤セルの色分けは条件付き書式（buildConditionalFormatRequests）
+// が担うため、ここでクリアするのは「ルールに一致しない自由入力セル」に前回の
+// 色が残らないようにするための保険。罫線・太字も含めているのは、出勤人数の
+// 行（buildAttendanceCountFormatRequests）の太字・境界線が、従業員数の増減で
+// 行位置が変わったときに前回の位置に残ったまま新しい位置にも追加され、
+// 二重（ズレて見える）にならないようにするため。
 export function buildClearFormatRequest(sheetId: number): SheetsApiRequest {
   return {
     repeatCell: {
@@ -23,8 +26,19 @@ export function buildClearFormatRequest(sheetId: number): SheetsApiRequest {
         startColumnIndex: 0,
         endColumnIndex: CLEAR_FORMAT_COLUMN_COUNT,
       },
-      cell: { userEnteredFormat: { backgroundColor: { red: 1, green: 1, blue: 1 } } },
-      fields: "userEnteredFormat.backgroundColor",
+      cell: {
+        userEnteredFormat: {
+          backgroundColor: { red: 1, green: 1, blue: 1 },
+          textFormat: { bold: false },
+          borders: {
+            top: { style: "NONE" },
+            bottom: { style: "NONE" },
+            left: { style: "NONE" },
+            right: { style: "NONE" },
+          },
+        },
+      },
+      fields: "userEnteredFormat(backgroundColor,textFormat,borders)",
     },
   };
 }
@@ -83,6 +97,56 @@ export function buildConditionalFormatRequests(
       },
     },
   }));
+}
+
+// 出勤人数の行（勤務区分ごとの日付別出勤人数。値そのものはCOUNTIFを使った
+// 数式でSheets側に計算させる）の見た目（太字・従業員の行との区切り線）を
+// 組み立てる。rowCountが0（対象の勤務区分が無い）なら何も返さない。
+export function buildAttendanceCountFormatRequests(
+  sheetId: number,
+  startRowIndex: number, // 0-indexed。従業員の最終行の次の行
+  rowCount: number,
+  totalColumns: number, // 従業員名列＋日付列
+): SheetsApiRequest[] {
+  if (rowCount <= 0) return [];
+  return [
+    {
+      repeatCell: {
+        range: {
+          sheetId,
+          startRowIndex,
+          endRowIndex: startRowIndex + rowCount,
+          startColumnIndex: 0,
+          endColumnIndex: totalColumns,
+        },
+        cell: { userEnteredFormat: { textFormat: { bold: true } } },
+        fields: "userEnteredFormat.textFormat",
+      },
+    },
+    {
+      updateBorders: {
+        range: {
+          sheetId,
+          startRowIndex,
+          endRowIndex: startRowIndex + 1,
+          startColumnIndex: 0,
+          endColumnIndex: totalColumns,
+        },
+        top: { style: "SOLID_THICK", color: { red: 0, green: 0, blue: 0 } },
+      },
+    },
+  ];
+}
+
+// 従業員名の列（A列）を、横スクロールしても常に見えるように固定する。
+// 印刷用シート（buildPrintSheetRequests.ts）も同様に名前の列を固定している。
+export function buildFreezePaneRequest(sheetId: number): SheetsApiRequest {
+  return {
+    updateSheetProperties: {
+      properties: { sheetId, gridProperties: { frozenColumnCount: 1 } },
+      fields: "gridProperties.frozenColumnCount",
+    },
+  };
 }
 
 // 再生成のたびにルールが積み重ならないよう、そのシートに既存の条件付き書式

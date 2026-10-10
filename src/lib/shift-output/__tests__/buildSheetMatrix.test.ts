@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { buildSheetMatrix } from "../buildSheetMatrix";
-import { CLOSED_DAY_COLOR, REQUESTED_LEAVE_COLOR, SYSTEM_ASSIGNED_LEAVE_COLOR } from "../colors";
+import {
+  CLOSED_DAY_COLOR,
+  LEAVE_COLOR_LIGHTEN_AMOUNT,
+  REQUESTED_LEAVE_COLOR,
+  SYSTEM_ASSIGNED_LEAVE_COLOR,
+  lightenHexColor,
+  pickFallbackShiftColor,
+} from "../colors";
 import type { Assignment } from "../../shift-solver/types";
 
 const employees = [
@@ -50,7 +57,7 @@ describe("buildSheetMatrix", () => {
     expect(matrix.rows[0].cells).toHaveLength(2);
   });
 
-  it("renders a shift assignment with the shift type name and its configured color", () => {
+  it("renders a shift assignment with the shift type name, colored by the shared palette (not the shift type's configured color)", () => {
     const matrix = buildSheetMatrix({
       periodStart: "2026-09-01",
       periodEnd: "2026-09-01",
@@ -59,7 +66,7 @@ describe("buildSheetMatrix", () => {
       assignments: [assignment({})],
     });
 
-    expect(matrix.rows[0].cells[0]).toEqual({ text: "早番", backgroundColor: "#111111" });
+    expect(matrix.rows[0].cells[0]).toEqual({ text: "早番", backgroundColor: pickFallbackShiftColor(0) });
   });
 
   it("falls back to the palette color when the shift type has no color set", () => {
@@ -87,10 +94,13 @@ describe("buildSheetMatrix", () => {
       ],
     });
 
-    expect(matrix.rows[0].cells[0]).toEqual({ text: "休", backgroundColor: REQUESTED_LEAVE_COLOR });
+    expect(matrix.rows[0].cells[0]).toEqual({
+      text: "休",
+      backgroundColor: lightenHexColor(REQUESTED_LEAVE_COLOR, LEAVE_COLOR_LIGHTEN_AMOUNT),
+    });
     expect(matrix.rows[1].cells[0]).toEqual({
       text: "公休",
-      backgroundColor: SYSTEM_ASSIGNED_LEAVE_COLOR,
+      backgroundColor: lightenHexColor(SYSTEM_ASSIGNED_LEAVE_COLOR, LEAVE_COLOR_LIGHTEN_AMOUNT),
     });
   });
 
@@ -107,8 +117,9 @@ describe("buildSheetMatrix", () => {
       closedDates: ["2026-09-01"],
     });
 
-    expect(matrix.rows[0].cells[0]).toEqual({ text: "定休日", backgroundColor: CLOSED_DAY_COLOR });
-    expect(matrix.rows[1].cells[0]).toEqual({ text: "定休日", backgroundColor: CLOSED_DAY_COLOR });
+    const expectedClosedDayColor = lightenHexColor(CLOSED_DAY_COLOR, LEAVE_COLOR_LIGHTEN_AMOUNT);
+    expect(matrix.rows[0].cells[0]).toEqual({ text: "定休日", backgroundColor: expectedClosedDayColor });
+    expect(matrix.rows[1].cells[0]).toEqual({ text: "定休日", backgroundColor: expectedClosedDayColor });
   });
 
   it("falls back to a blank cell when an assignment is missing for a given employee/date", () => {

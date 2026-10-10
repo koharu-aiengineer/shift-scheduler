@@ -47,3 +47,57 @@ export function computeEmployeeShiftSummary(
     leaveDaysCount: leaveDaysByEmployee.get(employee.id) ?? 0,
   }));
 }
+
+export type SheetEmployeeRow = {
+  employeeName: string;
+  // 対象月の日数分、日付順に並んだセルのテキスト（勤務区分名 / 休 / 公休 / 定休日 / 空欄など）
+  cellTexts: string[];
+};
+
+export type ComputeEmployeeShiftSummaryFromSheetInput = {
+  employees: { id: string; name: string }[];
+  shiftTypes: { id: string; name: string }[];
+  sheetRows: SheetEmployeeRow[];
+  // 対象月の日数。sheetRowsのcellTextsがこれより短い場合（Sheets APIは行末の
+  // 空セルを省略して返すため）、不足分は空欄＝休みとして扱う。
+  dayCount: number;
+};
+
+// 出力用スプレッドシートを読み直した結果（手動修正後の値を含む）から、
+// computeEmployeeShiftSummaryと同じ形の集計を作る純粋関数。
+// セルのテキストが勤務区分名のどれとも一致しない場合（休・公休・定休日・空欄・
+// 手直しによる誤字なども含む）は、その従業員のその日を全て「休み」として数える。
+// 出力用シートには書き戻さず、店長画面の表示専用に使う。
+export function computeEmployeeShiftSummaryFromSheetRows(
+  input: ComputeEmployeeShiftSummaryFromSheetInput,
+): EmployeeShiftSummary[] {
+  const shiftTypeIdByName = new Map(input.shiftTypes.map((st) => [st.name, st.id]));
+  const sheetRowByEmployeeName = new Map(input.sheetRows.map((row) => [row.employeeName, row]));
+
+  return input.employees.map((employee) => {
+    const sheetRow = sheetRowByEmployeeName.get(employee.name);
+    const countByShiftTypeId = new Map<string, number>();
+    let leaveDaysCount = 0;
+
+    for (let i = 0; i < input.dayCount; i++) {
+      const text = sheetRow?.cellTexts[i] ?? "";
+      const shiftTypeId = shiftTypeIdByName.get(text);
+      if (shiftTypeId) {
+        countByShiftTypeId.set(shiftTypeId, (countByShiftTypeId.get(shiftTypeId) ?? 0) + 1);
+      } else {
+        leaveDaysCount += 1;
+      }
+    }
+
+    return {
+      employeeId: employee.id,
+      employeeName: employee.name,
+      shiftCounts: input.shiftTypes.map((shiftType) => ({
+        shiftTypeId: shiftType.id,
+        shiftTypeName: shiftType.name,
+        count: countByShiftTypeId.get(shiftType.id) ?? 0,
+      })),
+      leaveDaysCount,
+    };
+  });
+}
